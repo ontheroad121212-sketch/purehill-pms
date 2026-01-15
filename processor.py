@@ -5,14 +5,14 @@ def process_data(uploaded_files, is_otb=False):
     if not uploaded_files:
         return pd.DataFrame()
     
-    # 다중 업로드 지원 로직
+    # 다중 업로드 지원 로직 (리스트가 아니면 리스트화)
     files = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
     combined_df = pd.DataFrame()
 
     for uploaded_file in files:
         try:
             if is_otb:
-                # 온더북(영업현황)은 데이터 행 추출을 위해 3줄 스킵
+                # OTB(영업현황) 파일은 데이터 중심 추출을 위해 3줄 스킵
                 df = pd.read_csv(uploaded_file, skiprows=3) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, skiprows=3)
             else:
                 # 실적 데이터는 헤더 위 2줄 스킵
@@ -46,7 +46,7 @@ def process_data(uploaded_files, is_otb=False):
             df['도착일'] = pd.to_datetime(df['도착일'], errors='coerce')
             df['lead_time'] = (df['도착일'] - df['예약일']).dt.days.fillna(0)
 
-            # 조식/마켓/글로벌 로직
+            # 조식/마켓/글로벌 판별
             df['breakfast_status'] = df.apply(lambda r: '조식포함' if any(kw in f"{r.get('service_code','')} {r.get('rate_type','')} {r.get('package','')}".upper() for kw in ['BF', '조식', 'BFR', 'BB']) else '조식불포함', axis=1)
             df['market_segment'] = df['market'].apply(lambda x: 'Group' if any(k in str(x).upper() for k in ['GRP', 'GROUP', 'DOS', 'BGRP', 'MICE']) else 'FIT')
             df['is_global_ota'] = df['account'].apply(lambda x: any(g in str(x).upper() for g in ['AGODA', 'EXPEDIA', 'BOOKING', 'TRIP', '아고다', '부킹닷컴', '익스피디아', '트립닷컴']))
@@ -66,6 +66,7 @@ def process_data(uploaded_files, is_otb=False):
                 combined_df = pd.concat([combined_df, df])
 
     if not combined_df.empty and is_otb:
+        # 멀티 파일 합친 후 정렬 및 중복 제거
         combined_df = combined_df.sort_values('일자_dt').drop_duplicates('일자_dt')
         
     return combined_df
