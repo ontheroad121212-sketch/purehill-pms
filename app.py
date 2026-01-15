@@ -63,6 +63,14 @@ col_up1, col_up2 = st.columns(2)
 with col_up1: prod_file = st.file_uploader("1. 실적 (Production)", type=['csv', 'xlsx'])
 with col_up2: otb_files = st.file_uploader("2. 온더북 (OTB)", type=['csv', 'xlsx'], accept_multiple_files=True)
 
+# 🚀 이 부분만 otb_files 코드 아래에 복사해서 넣으세요
+st.divider()
+st.subheader("➕ 정밀 분석용 추가 데이터 업로드 (Pace/Pick-up/리드타임)")
+cau1, cau2, cau3 = st.columns(3)
+with cau1: stly_file = st.file_uploader("전년 동기 OTB (STLY)", type=['csv', 'xlsx'])
+with cau2: snap_file = st.file_uploader("1주일 전 OTB 스냅샷", type=['csv', 'xlsx'])
+with cau3: raw_file = st.file_uploader("상세 예약 리스트 (Raw Data)", type=['csv', 'xlsx'])
+
 prod_data = process_data(prod_file, is_otb=False) if prod_file else pd.DataFrame()
 otb_data = process_data(otb_files, is_otb=True) if otb_files else pd.DataFrame()
 
@@ -271,7 +279,7 @@ if not prod_data.empty:
 # 5. 미래 OTB 및 시뮬레이션 (tab_f)
     with tab_f:
         if not otb_data.empty:
-            st.subheader("🚀 1월 통합 버짓 달성 현황 및 잔여 일수 시뮬레이션")
+            st.subheader("🚀 당월 통합 버짓 달성 현황 및 잔여 일수 시뮬레이션")
             
             # 🔥 [v15.9 핵심 수정] OTB 데이터 클리닝 (소계/총합계 행 제거)
             # 날짜 데이터(일자_dt)가 비어있는 '소계'나 '총합계' 행을 필터링하여 계산 오류를 원천 차단합니다.
@@ -405,6 +413,11 @@ if not prod_data.empty:
             if st.button("🤖 AI 전문가 미래 전략 리포트"):
                 if api_key:
                     with st.spinner("전문가가 팩트를 기반으로 전략을 구상 중입니다..."):
+                        # 데이터 존재 여부 확인 텍스트 생성
+                        stly_info = "제공됨" if stly_file else "부재(비교불가)"
+                        snap_info = "제공됨" if snap_file else "부재(Pace분석불가)"
+                        raw_info = "제공됨" if raw_file else "부재(리드타임분석불가)"
+                        
                         # 🔥 강력한 페르소나 및 팩트 체크 프롬프트
                         prompt = f"""
                         "너는 20년 경력의 RM 전문가다. 하지만 반드시 내가 제공한 데이터(업로드한 파일) 내에서만 수치를 인용하라. 전년 데이터나 과거 리드타임 데이터가 없다면 임의로 숫자를 지어내지 말고, **'데이터 부재로 비교 불가'**라고 명시한 뒤 현재의 OTB Pace와 버짓 달성률만 가지고 전략을 짜라. 소설 쓰지 말고 팩트 위주로 보고하라."
@@ -414,6 +427,13 @@ if not prod_data.empty:
                         - 남은 일수: {days_left}일
                         - 목표 달성 위해 매일 필요한 판매량: {req_rn_day:.1f}실
                         - 목표 달성 위해 필요한 단가: {req_adr:,.0f}원
+
+                        [업로드 데이터 현황]
+                        - 전년 동기 OTB(STLY): {stly_info}
+                        - 1주일 전 스냅샷: {snap_info}
+                        - 상세 예약 리스트(Raw): {raw_info}
+                        - 당월 매출 달성률: {rev_ach_rate:.1f}%
+                        - 남은 일수: {days_left}일 / 필요 일일판매량: {req_rn_day:.1f}실 / 필요 단가: {req_adr:,.0f}원
                         
                         1. [종합 경영 판단 및 버짓 예측]
                         - 버짓 달성 예측: 현재 예약 Pace를 고려할 때 당월 매출 목표 달성 가능성을 %로 예측하라. 숏폴(Shortfall) 발생 시 정확한 부족 금액을 산출하라.
