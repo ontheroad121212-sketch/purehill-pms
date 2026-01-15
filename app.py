@@ -7,7 +7,7 @@ from datetime import timedelta
 import pandas as pd
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 전략관제 v11.5", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 전략관제 v11.6", layout="wide")
 
 # 대시보드 스타일
 st.markdown("""
@@ -17,16 +17,24 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 2. 사이드바 (경영 가이드라인 및 목표 설정)
+# 2. 사이드바 (경영 가이드라인 및 월별 타겟 설정)
 with st.sidebar:
     st.header("🎯 경영 목표 및 설정")
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.divider()
-    target_occ = st.number_input("목표 점유율 (%)", value=85, help="AI가 이 점유율을 기준으로 부진 날짜를 판단합니다.")
-    target_adr = st.number_input("목표 ADR (만원)", value=60) * 10000
+    
+    # 🚀 [v11.6 추가] 월별 타겟 매출 및 RN 설정
+    st.subheader("📅 분석월 목표 셋팅")
+    target_rev_input = st.number_input("월 목표 매출액 (억원)", value=12.0, step=0.5)
+    target_rev_won = target_rev_input * 100000000
+    target_rn_input = st.number_input("월 목표 룸나잇 (RN)", value=1600, step=100)
+    
+    st.divider()
+    target_occ = st.number_input("기준 점유율 (%)", value=85, help="AI가 이 점유율을 기준으로 부진 날짜를 판단합니다.")
+    target_adr = st.number_input("기준 ADR (만원)", value=60) * 10000
     st.divider()
     st.info("💡 실적 파일 1개와 OTB 파일 여러 개를 동시에 선택해서 올리세요.")
-    st.caption("v11.5: 경영 목표 기반 뾰족한 AI 리포트 및 전 기능 통합")
+    st.caption("v11.6: 월별 타겟 관리 및 목표 기반 AI 분석 통합본")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
@@ -42,7 +50,6 @@ prod_data = process_data(prod_file, is_otb=False) if prod_file else pd.DataFrame
 otb_data = process_data(otb_files, is_otb=True) if otb_files else pd.DataFrame()
 
 if not prod_data.empty:
-    # 실적 분석의 기준일
     latest_booking_date = prod_data['예약일'].max()
 
     def calc_metrics(df):
@@ -58,7 +65,6 @@ if not prod_data.empty:
             if prev == 0: return "N/A"
             return f"{((curr - prev) / prev * 100):.1f}%"
 
-        # 데이터 분리
         f_curr, f_prev = target_df[target_df['market_segment'] == 'FIT'], compare_df[compare_df['market_segment'] == 'FIT']
         g_curr, g_prev = target_df[target_df['market_segment'] == 'Group'], compare_df[compare_df['market_segment'] == 'Group']
         
@@ -67,6 +73,29 @@ if not prod_data.empty:
 
         # 1구역: TOTAL 성과 대조
         st.subheader(f"✅ [{title_label} TOTAL 예약 성과]")
+        
+        # 🚀 [v11.6 추가] Monthly 탭일 경우 목표 달성 게이지 표시
+        if title_label == "MONTHLY":
+            gauge_col1, gauge_col2 = st.columns(2)
+            with gauge_col1:
+                rev_pct = (t_tot / target_rev_won) * 100
+                fig_rev = go.Figure(go.Indicator(
+                    mode = "gauge+number", value = rev_pct,
+                    title = {'text': "매출 목표 달성률 (%)"},
+                    gauge = {'axis': {'range': [0, 100]}, 'bar': {'color': "#1f77b4"}}
+                ))
+                fig_rev.update_layout(height=250, margin=dict(t=50, b=0, l=30, r=30))
+                st.plotly_chart(fig_rev, use_container_width=True)
+            with gauge_col2:
+                rn_pct = (t_rn / target_rn_input) * 100
+                fig_rn = go.Figure(go.Indicator(
+                    mode = "gauge+number", value = rn_pct,
+                    title = {'text': "RN 목표 달성률 (%)"},
+                    gauge = {'axis': {'range': [0, 100]}, 'bar': {'color': "#2ca02c"}}
+                ))
+                fig_rn.update_layout(height=250, margin=dict(t=50, b=0, l=30, r=30))
+                st.plotly_chart(fig_rn, use_container_width=True)
+
         st.caption(f"기준: {current_label} (비교대상: {prev_label})")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("총 예약금액", f"{t_tot:,.0f}원", delta=f"{get_delta_pct(t_tot, p_tot)} (전기: {p_tot:,.0f})")
@@ -86,7 +115,7 @@ if not prod_data.empty:
         g2.metric("Group ADR", f"{gc_adr:,.0f}원")
         st.divider()
 
-        # 4~5구역: 조식 분석 (지정 거래처 14개 필터링 로직 포함)
+        # 4~5구역: 조식 분석 (지정 거래처 14개 필터링)
         st.subheader("🍳 조식 포함 비중 및 지정 채널 선택률")
         bf1, bf2 = st.columns(2)
         t_all, t_bf = len(target_df), len(target_df[target_df['breakfast_status']=='조식포함'])
@@ -109,12 +138,12 @@ if not prod_data.empty:
                 st.plotly_chart(px.bar(acc_bf_plot, x='ratio', y='account', orientation='h', text='label', color='ratio', color_continuous_scale='YlOrRd'), use_container_width=True)
         st.divider()
 
-        # 6구역: 리드타임별 ADR 분석 (GM 수익 관리 핵심)
+        # 6구역: 리드타임별 ADR 분석
         st.subheader("📅 예약 리드타임별 판매 단가(ADR) 분석")
         target_df['lead_group'] = pd.cut(target_df['lead_time'], bins=[-1, 7, 14, 30, 60, 999], labels=['1주이내', '1-2주', '2-4주', '1-2개월', '2개월이상'])
         lead_adr = target_df.groupby('lead_group', observed=False).agg({'객실매출액':'sum', 'room_nights':'sum'}).reset_index()
         lead_adr['ADR'] = lead_adr['객실매출액'] / lead_adr['room_nights']
-        st.plotly_chart(px.line(lead_adr, x='lead_group', y='ADR', markers=True, title="예약 시점에 따른 평균 단가 추이 (얼리버드 할인 검증)"), use_container_width=True)
+        st.plotly_chart(px.line(lead_adr, x='lead_group', y='ADR', markers=True, title="예약 시점에 따른 평균 단가 추이"), use_container_width=True)
         st.write("---")
 
         # 7~8구역: 행동 분석 및 그래프 5종
@@ -136,21 +165,20 @@ if not prod_data.empty:
         if not global_ota.empty:
             st.plotly_chart(px.bar(global_ota, x="account", color="country", title="글로벌 OTA 국적 비중", barmode="stack", text_auto=True), use_container_width=True)
 
-        # 🚀 [v11.5] 뾰족한 AI 전략 버튼 (경영 목표 반영)
+        # 🚀 [v11.6] 목표 대비 AI 전략 분석
         st.write("---")
         if st.button(f"🤖 AI 전문가 [{title_label}] 전략 리포트", key=f"ai_btn_{title_label}"):
             if api_key:
-                with st.spinner(f"AI가 {title_label} 경영 성과를 정밀 진단 중입니다..."):
+                with st.spinner(f"AI가 {title_label} 성과를 진단 중입니다..."):
                     lead_context = lead_adr.set_index('lead_group')['ADR'].to_dict()
                     prompt = f"""
                     [엠버퓨어힐 GM 브리핑 - {title_label}]
-                    - 경영 목표치: ADR {target_adr:,.0f}원 / 점유율 {target_occ}%
-                    - 실제 달성도: ADR {t_adr:,.0f}원 / 판매 {t_rn}RN
-                    - 리드타임별 ADR 흐름: {lead_context}
-                    - 조식 포함 비중: {t_bf/t_all*100:.1f}%
+                    - 월 목표: 매출 {target_rev_won:,.0f}원 / 룸나잇 {target_rn_input}RN
+                    - 현재 실적: 매출 {t_tot:,.0f}원 ({(t_tot/target_rev_won*100):.1f}%) / 판매 {t_rn}RN ({(t_rn/target_rn_input*100):.1f}%)
+                    - 평균 ADR: {t_adr:,.0f}원
+                    - 리드타임별 ADR 상황: {lead_context}
                     
-                    위 데이터를 바탕으로 '매출이 올랐다'는 뻔한 소리 말고, GM이 즉시 실무진에게 지시할 수 있는 '뾰족한 3가지 액션 플랜'을 제안해줘.
-                    목표 달성을 위해 어떤 채널의 가격을 올리거나 어느 시점의 예약을 더 받아야 하는지 정확히 짚어줘.
+                    위 데이터를 기반으로 목표 달성을 위해 남은 기간 동안 어떤 채널의 가격을 조정하거나 어떤 마케팅에 집중해야 할지 GM에게 보고하듯 뾰족하게 제안해줘.
                     """
                     st.info(get_ai_insight(api_key, prompt))
             else: st.warning("사이드바에 Gemini API Key를 입력하세요.")
@@ -168,7 +196,7 @@ if not prod_data.empty:
         pm_start = (m_start - timedelta(days=1)).replace(day=1)
         render_booking_dashboard(prod_data[prod_data['예약일'] >= m_start], prod_data[(prod_data['예약일'] >= pm_start) & (prod_data['예약일'] < m_start)], "MONTHLY", "이번달", "지난달")
 
-    # --- 탭 4: 미래 OTB 고도화 및 수익 관리 (RM전략) ---
+    # --- 탭 4: 미래 OTB 고도화 및 수익 관리 ---
     with tab_f:
         if not otb_data.empty:
             st.subheader("🚀 미래 수익 관리 (Revenue Management) 전략")
@@ -180,7 +208,6 @@ if not prod_data.empty:
             f_o3.metric("최고 점유율 날짜", f"{otb_future.loc[otb_future['점유율'].idxmax(), '일자']}")
             f_o4.metric("누적 대기 매출", f"{otb_future['합계_매출'].sum():,.0f}원")
             
-            # [RM 시각화: Pace 분석]
             st.write("---")
             st.subheader("📈 미래 예약 가속도(Pace): 점유율 vs ADR 교차 분석")
             fig_pace = go.Figure()
@@ -201,16 +228,9 @@ if not prod_data.empty:
             if st.button("🤖 AI 전문가 미래 수익 전략 리포트"):
                 if api_key:
                     with st.spinner("미래 데이터를 진단 중..."):
-                        # 기회 손실 및 부진 날짜 자동 추출
                         low_occ_dates = otb_future[otb_future['점유율'] < target_occ * 0.5]['일자'].tolist()[:5]
                         high_occ_low_adr = otb_future[(otb_future['점유율'] > target_occ) & (otb_future['합계_ADR'] < target_adr)]['일자'].tolist()[:5]
-                        context = f"""
-                        [엠버퓨어힐 미래 수익 진단]
-                        - 목표 점유율: {target_occ}% / 목표 ADR: {target_adr:,.0f}원
-                        - 부진 예상 날짜 (점유율 부족): {low_occ_dates}
-                        - 기회 손실 날짜 (방은 찼는데 너무 쌈): {high_occ_low_adr}
-                        - 미래 평균 점유율: {future_occ:.1f}% / 평균 ADR: {otb_future['합계_ADR'].mean():,.0f}원
-                        """
-                        st.info(get_ai_insight(api_key, context + " 위 데이터를 바탕으로 가격을 당장 올려야 할 날짜와 공격적인 판촉이 필요한 날짜를 콕 집어서 알려줘."))
+                        context = f"평균점유율:{future_occ:.1f}%, 부진날짜:{low_occ_dates}, 기회손실날짜:{high_occ_low_adr}"
+                        st.info(get_ai_insight(api_key, context + " 위 데이터를 바탕으로 수익 극대화 전략을 제안해줘."))
         else: st.warning("온더북 파일을 업로드하세요.")
 else: st.info("실적 파일을 업로드하여 경영 관제를 시작하세요.")
