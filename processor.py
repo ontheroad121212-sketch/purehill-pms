@@ -5,16 +5,17 @@ def process_data(uploaded_files, is_otb=False):
     if not uploaded_files:
         return pd.DataFrame()
     
-    # 리스트 형식이 아니면 리스트로 변환 (단일/다중 업로드 모두 대응)
+    # 다중 업로드 지원 로직
     files = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
     combined_df = pd.DataFrame()
 
     for uploaded_file in files:
         try:
-            # 실적 데이터는 2줄 스킵, 온더북(영업현황)은 데이터 중심 추출을 위해 3줄 스킵
             if is_otb:
+                # 온더북(영업현황)은 데이터 행 추출을 위해 3줄 스킵
                 df = pd.read_csv(uploaded_file, skiprows=3) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, skiprows=3)
             else:
+                # 실적 데이터는 헤더 위 2줄 스킵
                 df = pd.read_csv(uploaded_file, skiprows=2) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, skiprows=2)
         except:
             continue
