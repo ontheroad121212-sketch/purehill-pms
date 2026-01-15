@@ -7,7 +7,7 @@ from datetime import timedelta
 import pandas as pd
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 전략관제 v11.8", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 전략관제 v11.9", layout="wide")
 
 # 대시보드 스타일
 st.markdown("""
@@ -23,7 +23,7 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.divider()
     
-    # 🚀 [v11.8 추가] 12개월 목표 일괄 설정 (숨김/펼치기)
+    # 🚀 [v11.8/11.9 통합] 12개월 목표 일괄 설정 (숨김/펼치기)
     targets = {}
     with st.expander("📅 12개월 경영 목표 셋팅 (펼치기)", expanded=False):
         st.info("각 월별 목표 매출(억원)과 RN을 입력하세요.")
@@ -40,7 +40,7 @@ with st.sidebar:
     target_adr = st.number_input("기준 ADR (만원)", value=60) * 10000
     st.divider()
     st.info("💡 실적 파일 1개와 OTB 파일 여러 개를 동시에 선택해서 올리세요.")
-    st.caption("v11.8: 12개월 타겟 일괄 관리 및 전 기능 통합 완결판")
+    st.caption("v11.9: 온더북 목표 달성 현황 분석 통합 완결판")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
@@ -80,10 +80,10 @@ if not prod_data.empty:
 
         st.subheader(f"✅ [{title_label} TOTAL 예약 성과]")
         
-        # 🚀 [v11.8 추가] Monthly 탭일 경우 해당 월 타겟 자동 매칭 및 게이지 표시
+        # 🚀 [Monthly 탭 목표 게이지 로직]
         if title_label == "MONTHLY":
             curr_month_target = targets.get(analysis_month, {"rev_won": 1200000000, "rn": 1600})
-            st.info(f"📊 {analysis_month}월 경영 목표 대비 달성 현황")
+            st.info(f"📊 {analysis_month}월 경영 목표 대비 실적 달성 현황")
             gauge_col1, gauge_col2 = st.columns(2)
             with gauge_col1:
                 rev_pct = (t_tot / curr_month_target['rev_won']) * 100 if curr_month_target['rev_won'] > 0 else 0
@@ -123,7 +123,7 @@ if not prod_data.empty:
         g2.metric("Group ADR", f"{gc_adr:,.0f}원")
         st.divider()
 
-        # 4~5구역: 조식 분석 (지정 거래처 14개 로직)
+        # 4~5구역: 조식 분석
         st.subheader("🍳 조식 포함 비중 및 지정 채널 선택률")
         bf1, bf2 = st.columns(2)
         t_all, t_bf = len(target_df), len(target_df[target_df['breakfast_status']=='조식포함'])
@@ -172,7 +172,7 @@ if not prod_data.empty:
         if not global_ota.empty:
             st.plotly_chart(px.bar(global_ota, x="account", color="country", title="글로벌 OTA 국적 비중", barmode="stack", text_auto=True), use_container_width=True)
 
-        # AI 전략 리포트 (목표 자동 인식)
+        # AI 전략 리포트
         st.write("---")
         if st.button(f"🤖 AI 전문가 [{title_label}] 전략 리포트", key=f"ai_btn_{title_label}"):
             if api_key:
@@ -183,13 +183,13 @@ if not prod_data.empty:
                     - 경영 목표: 매출 {m_target['rev_won']:,.0f}원 / 룸나잇 {m_target['rn']}RN
                     - 현재 실적: 매출 {t_tot:,.0f}원 / 판매 {t_rn}RN
                     - 평균 ADR: {t_adr:,.0f}원
-                    위 데이터를 기반으로 남은 기간 경영 목표 달성을 위한 뾰족한 전략을 제안해줘.
+                    위 데이터를 기반으로 목표 달성을 위한 뾰족한 전략을 제안해줘.
                     """
                     st.info(get_ai_insight(api_key, prompt))
             else: st.warning(" Gemini API Key를 입력하세요.")
 
     # --- 탭 구성 ---
-    tab_d, tab_w, tab_m, tab_f = st.tabs(["📅 Daily", "📊 Weekly", "📈 Monthly", "🚀 Future OTB (전략관제)"])
+    tab_d, tab_w, tab_m, tab_f = st.tabs(["📅 Daily", "📊 Weekly", "📈 Monthly", "🚀 Future OTB (전략)"])
 
     with tab_d: render_booking_dashboard(prod_data[prod_data['예약일'] == latest_booking_date], prod_data[prod_data['예약일'] == latest_booking_date - timedelta(days=1)], "DAILY", "오늘", "어제")
     with tab_w:
@@ -201,11 +201,38 @@ if not prod_data.empty:
         pm_start = (m_start - timedelta(days=1)).replace(day=1)
         render_booking_dashboard(prod_data[prod_data['예약일'] >= m_start], prod_data[(prod_data['예약일'] >= pm_start) & (prod_data['예약일'] < m_start)], "MONTHLY", "이번달", "지난달")
 
-    # --- 탭 4: 미래 OTB 고도화 ---
+    # --- 탭 4: 미래 OTB 고도화 및 목표 달성 현황 ---
     with tab_f:
         if not otb_data.empty:
-            st.subheader("🚀 미래 수익 관리 (Revenue Management) 전략")
+            st.subheader("🚀 미래 수익 관리 (Revenue Management) 및 달성 현황")
             otb_future = otb_data[otb_data['일자_dt'] >= latest_booking_date]
+            
+            # 🚀 [v11.9 신규] 미래 OTB 기반 월별 목표 달성 게이지 추가
+            curr_month_future = otb_future[otb_future['일자_dt'].dt.month == analysis_month]
+            if not curr_month_future.empty:
+                m_target = targets.get(analysis_month, {"rev_won": 1200000000, "rn": 1600})
+                future_rev = curr_month_future['합계_매출'].sum()
+                future_rn = curr_month_future['합계_객실'].sum()
+                
+                st.write(f"### 🎯 {analysis_month}월 OTB 확정 데이터 기반 목표 달성도")
+                st.caption("현재 예약된 확정치(On-the-book) 기준입니다.")
+                f_gauge1, f_gauge2 = st.columns(2)
+                with f_gauge1:
+                    f_rev_pct = (future_rev / m_target['rev_won']) * 100 if m_target['rev_won'] > 0 else 0
+                    st.plotly_chart(go.Figure(go.Indicator(
+                        mode = "gauge+number", value = f_rev_pct,
+                        title = {'text': f"OTB 매출 달성률 (%)"},
+                        gauge = {'axis': {'range': [0, 100]}, 'bar': {'color': "#FF4B4B"}}
+                    )).update_layout(height=250, margin=dict(t=50, b=0, l=30, r=30)), use_container_width=True)
+                with f_gauge2:
+                    f_rn_pct = (future_rn / m_target['rn']) * 100 if m_target['rn'] > 0 else 0
+                    st.plotly_chart(go.Figure(go.Indicator(
+                        mode = "gauge+number", value = f_rn_pct,
+                        title = {'text': f"OTB RN 달성률 (%)"},
+                        gauge = {'axis': {'range': [0, 100]}, 'bar': {'color': "#FF4B4B"}}
+                    )).update_layout(height=250, margin=dict(t=50, b=0, l=30, r=30)), use_container_width=True)
+                st.divider()
+
             f_o1, f_o2, f_o3, f_o4 = st.columns(4)
             f_o1.metric("향후 평균 점유율", f"{otb_future['점유율'].mean():.1f}%")
             f_o2.metric("향후 평균 ADR", f"{otb_future['합계_ADR'].mean():,.0f}원")
