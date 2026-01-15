@@ -2,7 +2,7 @@ import pandas as pd
 
 def process_data(uploaded_file):
     try:
-        # 엑셀/CSV 구분해서 읽기 (맨 위 2줄 제외)
+        # 엑셀/CSV 구분해서 읽기 (제목 위 2줄 제외)
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file, skiprows=2)
         else:
@@ -10,10 +10,10 @@ def process_data(uploaded_file):
     except:
         return pd.DataFrame()
 
-    # 항목 이름 공백 제거
+    # 항목 이름의 공백 제거
     df.columns = df.columns.str.strip()
     
-    # 사장님 엑셀 항목명 -> 시스템용 이름 매핑
+    # 퓨어힐 엑셀 항목명 -> 시스템용 이름 매핑
     mapping = {
         '예약일자': '예약일', '입실일자': '도착일', '퇴실일자': '출발일',
         '총금액': '판매금액', '박수': 'los', '예약경로': 'channel',
@@ -29,24 +29,24 @@ def process_data(uploaded_file):
     df['los'] = pd.to_numeric(df['los'], errors='coerce').fillna(0)
     df['rooms'] = pd.to_numeric(df['rooms'], errors='coerce').fillna(1)
     
-    # [중요] 룸나잇(RN) 계산: 판매한 객실 수 * 박수
+    # [핵심] 룸나잇(RN) 계산: 판매한 객실 수 * 박수
     df['room_nights'] = df['rooms'] * df['los']
     
-    # 리드타임 계산
+    # [핵심] 리드타임 계산
     df['lead_time'] = (df['도착일'] - df['예약일']).dt.days.fillna(0)
     
-    # [중요] FIT / Group 구분 로직
-    # 시장 코드에 'GRP'가 포함되면 Group, 아니면 FIT로 분류
+    # [핵심] FIT / Group 구분 로직
     def classify_market(m):
         m_str = str(m).upper()
-        if 'GRP' in m_str or 'GROUP' in m_str or 'DOS' in m_str:
+        # 시장 코드에 GRP, GROUP, DOS, BGRP 등이 포함되면 Group으로 간주
+        if any(key in m_str for key in ['GRP', 'GROUP', 'DOS', 'BGRP']):
             return 'Group'
         return 'FIT'
     
     df['market_segment'] = df['market'].apply(classify_market)
     df['account'] = df['account'].fillna('개인/현장')
     
-    # 취소 데이터 제외
+    # '취소' 상태 데이터 제외 (실제 실적 중심)
     df = df[df['status'] != '취소']
     
     return df
