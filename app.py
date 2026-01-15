@@ -8,7 +8,7 @@ import pandas as pd
 import calendar
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 통합 관제 v14.1", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 통합 관제 v15.0", layout="wide")
 
 # 대시보드 스타일 (가독성 및 직관적 대조 강조)
 st.markdown("""
@@ -54,7 +54,7 @@ with st.sidebar:
     
     st.divider()
     target_occ_ref = st.number_input("AI 판단 점유율 기준", value=85)
-    st.caption("v14.1: 시뮬레이션 최적화 및 전체 성과 대조 완결본")
+    st.caption("v15.0: AI 전략 전문가 리포트 고도화 버전")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
@@ -77,7 +77,7 @@ if not prod_data.empty:
         adr = room_sales / rn if rn > 0 else 0
         return total_sales, room_sales, rn, adr
 
-    # 🚀 [v14.1 무삭제 메인 대시보드 함수]
+    # 🚀 [v14.1/15.0 통합 메인 대시보드 함수]
     def render_booking_dashboard(curr_df, prev_df, title_label, current_label, prev_label):
         def get_delta_pct(curr, prev):
             if prev == 0: return "N/A"
@@ -97,7 +97,7 @@ if not prod_data.empty:
         c3.metric("판매 룸나잇", f"{t_rn:,.0f} RN", delta=f"{int(t_rn - p_rn):+d} RN (전기: {p_rn:,.0f})")
         c4.metric("객실 ADR (Net)", f"{t_adr:,.0f}원", delta=f"{get_delta_pct(t_adr, p_adr)} (전기: {p_adr:,.0f})")
 
-        # 🚀 [추가 지시] 조식 비중 분석 (전체 / FIT / 그룹)
+        # 🚀 [추가 지시] 조식 비중 분석
         st.write("---")
         st.subheader("🍳 조식 포함 예약 비중 (Segment Breakdown)")
         def get_bf_ratio(df):
@@ -106,11 +106,13 @@ if not prod_data.empty:
             return (bf / total * 100) if total > 0 else 0
 
         bc1, bc2, bc3 = st.columns(3)
-        bc1.metric("전체 조식 비중", f"{get_bf_ratio(curr_df):.1f}%")
-        bc2.metric("FIT 조식 비중", f"{get_bf_ratio(curr_df[curr_df['market_segment'] == 'FIT']):.1f}%")
+        bf_total_val = get_bf_ratio(curr_df)
+        bf_fit_val = get_bf_ratio(curr_df[curr_df['market_segment'] == 'FIT'])
+        bc1.metric("전체 조식 비중", f"{bf_total_val:.1f}%")
+        bc2.metric("FIT 조식 비중", f"{bf_fit_val:.1f}%")
         bc3.metric("Group 조식 비중", f"{get_bf_ratio(curr_df[curr_df['market_segment'] == 'Group']):.1f}%")
 
-        # Monthly 탭 버짓 게이지 (유지)
+        # Monthly 탭 버짓 게이지
         if title_label == "MONTHLY":
             m_target = targets.get(analysis_month)
             st.write("---")
@@ -123,11 +125,10 @@ if not prod_data.empty:
                 act_occ = (t_rn / (130 * 30)) * 100
                 st.plotly_chart(go.Figure(go.Indicator(mode="gauge+number", value=(act_occ/m_target['occ'])*100, title={'text':"OCC달성(%)"})).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
 
-        # 🚀 [추가 지시] FIT / Group 세그먼트별 직관 대조
+        # 🚀 [v14.1 유지] FIT / Group 세그먼트별 직관 대조
         st.write("---")
         f_curr, f_prev = curr_df[curr_df['market_segment'] == 'FIT'], prev_df[prev_df['market_segment'] == 'FIT']
         g_curr, g_prev = curr_df[curr_df['market_segment'] == 'Group'], prev_df[prev_df['market_segment'] == 'Group']
-        
         ft_tot, ft_room, ft_rn, ft_adr = calc_metrics(f_curr)
         fp_tot, fp_room, fp_rn, fp_adr = calc_metrics(f_prev)
         gt_tot, gt_room, gt_rn, gt_adr = calc_metrics(g_curr)
@@ -140,7 +141,6 @@ if not prod_data.empty:
         fc3.metric("FIT RN", f"{ft_rn:,.0f} RN", delta=f"{int(ft_rn - fp_rn):+d} RN")
         fc4.metric("FIT ADR (Net)", f"{ft_adr:,.0f}원", delta=f"{get_delta_pct(ft_adr, fp_adr)}")
 
-        # FIT 행동 지표 (리드타임 / LOS / 국적비)
         if not f_curr.empty:
             st.write("**[FIT 전체 행동 패턴 분석]**")
             fa1, fa2, fa3 = st.columns(3)
@@ -157,8 +157,8 @@ if not prod_data.empty:
         gc3.metric("그룹 RN", f"{gt_rn:,.0f} RN", delta=f"{int(gt_rn - gp_rn):+d} RN")
         gc4.metric("그룹 ADR (Net)", f"{gt_adr:,.0f}원", delta=f"{get_delta_pct(gt_adr, gp_adr)}")
 
-        # FIT 거래처 심층 분석 (무삭제)
         st.write("---")
+        # 🚀 [v14.1 유지] FIT 거래처 심층 분석
         st.subheader("📊 FIT 거래처별 심층 분석 (마이스/그룹 제외)")
         pure_f = f_curr[~f_curr['account'].str.contains('마이스|그룹|GRP|MICE', na=False, case=False)]
         acc_stats = pure_f.groupby('account').agg({'room_nights':'sum','객실매출액':'sum','los':'mean','lead_time':'mean'}).reset_index()
@@ -171,7 +171,7 @@ if not prod_data.empty:
         with g_col3: st.plotly_chart(px.bar(acc_stats.sort_values('los').tail(10), x='los', y='account', orientation='h', title="거래처별 평균 LOS", text_auto='.1f', color_continuous_scale='Purples', color='los'), use_container_width=True)
         with g_col4: st.plotly_chart(px.bar(acc_stats.sort_values('lead_time').tail(10), x='lead_time', y='account', orientation='h', title="거래처별 평균 리드타임", text_auto='.1f', color_continuous_scale='Oranges', color='lead_time'), use_container_width=True)
 
-        # 글로벌 OTA 국적 비중 & 조식 분석 (무삭제)
+        # 글로벌 OTA 국적 비중 & 조식 분석 (원본 보존)
         g_ch = ['아고다', 'AGODA', '익스피디아', '부킹', '트립']
         gl_df = f_curr[f_curr['account'].str.upper().str.contains('|'.join(g_ch), na=False)]
         if not gl_df.empty:
@@ -185,8 +185,32 @@ if not prod_data.empty:
                 bf_s['ratio'] = (bf_s['조식포함'] / bf_s.iloc[:, 1:].sum(axis=1)) * 100
                 st.plotly_chart(px.bar(bf_s.sort_values('ratio', ascending=False), x='ratio', y='account', orientation='h', title="거래처별 조식 선택률 (%)", color_continuous_scale='YlOrRd', color='ratio'), use_container_width=True)
 
-        if st.button(f"🤖 AI [{title_label}] 실적 분석 리포트", key=f"ai_{title_label}"):
-            if api_key: st.info(get_ai_insight(api_key, f"매출:{t_tot:,.0f}, RN:{t_rn}, ADR:{t_adr:,.0f} 실적을 분석해줘."))
+        # 🚀 [v15.0 핵심] 뾰족한 AI 전략 리포트 로직
+        if st.button(f"🤖 AI 전문가 [{title_label}] 전략 리포트", key=f"ai_{title_label}"):
+            if api_key:
+                with st.spinner("전문가가 성과를 정밀 진단 중..."):
+                    m_bud = targets.get(analysis_month)
+                    top_5_acc = acc_stats.sort_values('room_nights', ascending=False).head(5)[['account', 'room_nights', 'Net_ADR']].to_dict('records')
+                    
+                    # 뾰족한 분석용 프롬프트 구성
+                    prompt = f"""
+                    너는 글로벌 럭셔리 호텔 20년 경력의 Revenue Management 전문가다. 사장님(CEO)께 보고하듯 '현상-원인-액션아이템' 구조로 매우 뾰족하게 제언하라.
+                    
+                    [현재 데이터 요약]
+                    - 분석 월: {analysis_month}월 / 분석 주기: {title_label}
+                    - 실적: 매출 {t_room:,.0f}원, RN {t_rn}, ADR {t_adr:,.0f}원
+                    - 전기 대비 추이: 총매출 {get_delta_pct(t_tot, p_tot)}, ADR {get_delta_pct(t_adr, p_adr)}
+                    - FIT 조식 비중: {bf_fit_val:.1f}% / 주요 거래처 성과: {top_5_acc}
+                    
+                    [분석 지시사항]
+                    1. 전기 대비 매출은 늘었으나 ADR이 하락했다면, 아고다/익스피디아 등 글로벌 채널의 국적 믹스 변화나 저가 경쟁 측면에서 이유를 명확히 짚어라.
+                    2. 현재 OTB 데이터를 기반으로 월간 버짓 달성을 위해 남은 기간 매일 최소 몇 실을 얼마에 팔아야 하는지(Required Pace)를 시뮬레이션 결과와 연동해 언급하라.
+                    3. 조식 비중을 높여 부대수익을 극대화할 수 있는 구체적인 채널별 가격 셋팅(Add-on) 전략을 제안하라.
+                    4. 현 시점 가장 시급히 조정해야 할 판매 날짜와 그 날의 권장 판매가(Net)를 숫자로 제시하라.
+                    
+                    보고 형식: 서술형 대신 불렛포인트로 임팩트 있게 요약할 것.
+                    """
+                    st.info(get_ai_insight(api_key, prompt))
 
     # 4. 탭 구성
     tab_d, tab_w, tab_m, tab_f = st.tabs(["📅 Daily", "📊 Weekly", "📈 Monthly", "🚀 Future OTB (전략관제)"])
@@ -198,7 +222,7 @@ if not prod_data.empty:
         m_start = latest_booking_date.replace(day=1)
         render_booking_dashboard(prod_data[prod_data['예약일'] >= m_start], prod_data[(prod_data['예약일'] >= (m_start - timedelta(days=1)).replace(day=1)) & (prod_data['예약일'] < m_start)], "MONTHLY", "이번달", "지난달")
 
-    # 🚀 [v14.1 핵심] 미래 OTB 탭 및 최적화된 시뮬레이션
+    # 🚀 [v14.1/15.0 최적화] 미래 OTB 탭 및 최적화된 시뮬레이션
     with tab_f:
         if not otb_data.empty:
             st.subheader("🚀 향후 4개월 월별 버짓 달성 현황 및 긴급 시뮬레이션")
@@ -207,34 +231,25 @@ if not prod_data.empty:
             # 🔥 [시뮬레이션 최적화 버전] 🔥
             cur_month = latest_booking_date.month
             m_bud = targets.get(cur_month)
-            # 현재 월의 확정된 OTB 데이터 필터링
             month_otb = otb_future[otb_future['일자_dt'].dt.month == cur_month]
             
             if m_bud:
                 st.error(f"🚨 {cur_month}월 버짓 달성 긴급 시뮬레이션 (Shortfall Analysis)")
-                # 월말까지 남은 일수 계산
                 last_day_of_month = calendar.monthrange(latest_booking_date.year, cur_month)[1]
                 days_left = last_day_of_month - latest_booking_date.day
-                
-                # 현재 OTB 매출과 RN 합산
                 c_rev = month_otb['합계_매출'].sum() if not month_otb.empty else 0
                 c_rn = month_otb['합계_객실'].sum() if not month_otb.empty else 0
-                
-                # 부족분(Shortfall) 계산
                 s_rev = max(0, m_bud['rev_won'] - c_rev)
                 s_rn = max(0, m_bud['rn'] - c_rn)
                 
                 if days_left > 0:
                     req_rn_per_day = s_rn / days_left
                     req_adr = s_rev / s_rn if s_rn > 0 else 0
-                    
                     sc1, sc2, sc3 = st.columns(3)
                     sc1.metric("월말까지 남은 일수", f"{days_left}일")
                     sc2.metric("매일 팔아야 할 방수", f"{req_rn_per_day:.1f} RN/일")
                     sc3.metric("판매 권장 객단가(Net)", f"{req_adr:,.0f}원")
-                    st.warning(f"💡 **총지배인 가이드:** {cur_month}월 목표 달성을 위해 남은 {days_left}일간 매일 {req_rn_per_day:.1f}실을 {req_adr:,.0f}원에 팔아야 버짓을 채울 수 있습니다.")
-                else:
-                    st.info("현재 분석일이 월말이거나 이미 지났습니다.")
+                    st.warning(f"💡 **총지배인 가이드:** 목표 달성을 위해 남은 {days_left}일간 매일 {req_rn_per_day:.1f}실을 {req_adr:,.0f}원에 팔아야 버짓을 채울 수 있습니다.")
 
             # 향후 4개월 월별 게이지 (무삭제)
             for i in range(4):
