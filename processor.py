@@ -1,5 +1,5 @@
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 def process_data(uploaded_file):
     try:
@@ -20,16 +20,14 @@ def process_data(uploaded_file):
     }
     df = df.rename(columns=mapping)
     
-    # [데이터 정제] 합계 제외 및 취소 데이터 제거
+    # 데이터 정제 (총합계 제외)
     if '고객명' in df.columns:
         df = df[df['고객명'].str.contains('합계|총합계') == False]
     df = df[df['status'].str.strip().isin(['RR', 'CI', 'RC'])]
     
-    # [날짜 형식 변환]
+    # 날짜 및 수치 변환
     df['예약일'] = pd.to_datetime(df['예약일'], errors='coerce')
     df['도착일'] = pd.to_datetime(df['도착일'], errors='coerce')
-    
-    # [수치 변환]
     df['총매출액'] = pd.to_numeric(df['총매출액'], errors='coerce').fillna(0)
     df['객실매출액'] = pd.to_numeric(df['객실매출액'], errors='coerce').fillna(0)
     df['los'] = pd.to_numeric(df['los'], errors='coerce').fillna(0)
@@ -37,15 +35,15 @@ def process_data(uploaded_file):
     df['room_nights'] = df['rooms'] * df['los']
     df['lead_time'] = (df['도착일'] - df['예약일']).dt.days.fillna(0)
 
-    # [마켓 분류]
+    # 마켓 세그먼트 (Group/FIT)
     def classify_market(m):
         m_str = str(m).upper()
         if any(key in m_str for key in ['GRP', 'GROUP', 'DOS', 'BGRP', 'MICE']):
             return 'Group'
         return 'FIT'
     df['market_segment'] = df['market'].apply(classify_market)
-    
-    # [글로벌 OTA 판별]
+
+    # 글로벌 OTA 판별
     def is_global(acc):
         acc_u = str(acc).upper()
         globals = ['AGODA', 'EXPEDIA', 'BOOKING', 'TRIP', '아고다', '부킹닷컴', '익스피디아', '트립닷컴']
