@@ -7,7 +7,7 @@ st.set_page_config(page_title="퓨어힐 PMS AI 대시보드", layout="wide")
 st.title("🏨 퓨어힐 PMS AI 분석 비서")
 
 # 사장님의 API Key를 여기에 넣으세요 (나중에는 보안 설정을 따로 할 수 있어요)
-API_KEY = "여기에_복사한_API_KEY를_넣으세요" 
+API_KEY = "AIzaSyA7JanbIy4xRr0ICGO8pDOqZvxq2mPPg20" 
 
 uploaded_file = st.file_uploader("PMS 파일을 올려주세요", type=['csv', 'xlsx'])
 
