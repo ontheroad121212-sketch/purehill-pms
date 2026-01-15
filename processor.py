@@ -5,13 +5,13 @@ def process_data(uploaded_files, is_otb=False):
     if not uploaded_files:
         return pd.DataFrame()
     
-    # 리스트 형식이 아니면 리스트로 변환 (단일 업로드와 다중 업로드 모두 대응)
+    # 리스트 형식이 아니면 리스트로 변환 (단일/다중 업로드 모두 대응)
     files = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
     combined_df = pd.DataFrame()
 
     for uploaded_file in files:
         try:
-            # 실적 데이터는 2줄 스킵, 온더북(영업현황)은 데이터만 뽑기 위해 3줄 스킵이 적절함
+            # 실적 데이터는 2줄 스킵, 온더북(영업현황)은 데이터 중심 추출을 위해 3줄 스킵
             if is_otb:
                 df = pd.read_csv(uploaded_file, skiprows=3) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, skiprows=3)
             else:
@@ -53,24 +53,18 @@ def process_data(uploaded_files, is_otb=False):
 
         # --- [유형 2] 영업 현황 데이터 (OTB) ---
         else:
-            # 영업현황 파일의 컬럼 재설정 (사장님 파일의 19개 컬럼 구조)
             if len(df.columns) >= 19:
                 df = df.iloc[:, :19]
                 df.columns = ['일자', '요일', '개인_객실', '개인_비율', '개인_ADR', '개인_매출', '개인_매출비율', 
                               '단체_객실', '단체_비율', '단체_ADR', '단체_매출', '단체_매출비율', 
                               '내부이용', '무료', '합계_객실', '점유율', '합계_ADR', 'RevPAR', '합계_매출']
-                
-                # '일자'가 날짜 형식이 아닌 행(Sub-total, Total 등) 제거
                 df['일자_dt'] = pd.to_datetime(df['일자'], errors='coerce')
                 df = df.dropna(subset=['일자_dt'])
-                
                 for col in ['점유율', '합계_매출', '합계_ADR', '합계_객실', 'RevPAR']:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                
                 combined_df = pd.concat([combined_df, df])
 
     if not combined_df.empty and is_otb:
-        # 여러 달의 파일을 합친 후 날짜순 정렬 및 중복(겹치는 날짜) 제거
         combined_df = combined_df.sort_values('일자_dt').drop_duplicates('일자_dt')
         
     return combined_df
