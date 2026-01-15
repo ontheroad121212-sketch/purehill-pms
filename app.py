@@ -7,7 +7,7 @@ from datetime import timedelta
 import pandas as pd
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 전략관제 v11.7", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 전략관제 v11.8", layout="wide")
 
 # 대시보드 스타일
 st.markdown("""
@@ -17,25 +17,30 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 2. 사이드바 (경영 가이드라인 및 월별 타겟 설정)
+# 2. 사이드바 (경영 가이드라인 및 12개월 목표 설정)
 with st.sidebar:
     st.header("🎯 경영 목표 및 설정")
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.divider()
     
-    # 🚀 [v11.7 추가] 월별 목표 설정 숨김/펼치기 기능
-    with st.expander("📅 월별 경영 목표 셋팅 (펼치기)", expanded=False):
-        st.info("분석하고자 하는 달의 목표를 입력하세요.")
-        target_rev_input = st.number_input("월 목표 매출액 (억원)", value=12.0, step=0.5)
-        target_rev_won = target_rev_input * 100000000
-        target_rn_input = st.number_input("월 목표 룸나잇 (RN)", value=1600, step=100)
+    # 🚀 [v11.8 추가] 12개월 목표 일괄 설정 (숨김/펼치기)
+    targets = {}
+    with st.expander("📅 12개월 경영 목표 셋팅 (펼치기)", expanded=False):
+        st.info("각 월별 목표 매출(억원)과 RN을 입력하세요.")
+        cols = st.columns(2)
+        for i in range(1, 13):
+            with cols[0 if i <= 6 else 1]:
+                st.write(f"**[{i}월]**")
+                rev = st.number_input(f"{i}월 매출(억)", value=12.0, step=0.5, key=f"rev_{i}")
+                rn = st.number_input(f"{i}월 RN", value=1600, step=100, key=f"rn_{i}")
+                targets[i] = {"rev_won": rev * 100000000, "rn": rn}
     
     st.divider()
     target_occ = st.number_input("기준 점유율 (%)", value=85, help="AI가 이 점유율을 기준으로 부진 날짜를 판단합니다.")
     target_adr = st.number_input("기준 ADR (만원)", value=60) * 10000
     st.divider()
     st.info("💡 실적 파일 1개와 OTB 파일 여러 개를 동시에 선택해서 올리세요.")
-    st.caption("v11.7: 목표 설정 숨김 기능 및 전 탭 AI 탑재 완결판")
+    st.caption("v11.8: 12개월 타겟 일괄 관리 및 전 기능 통합 완결판")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
@@ -52,6 +57,7 @@ otb_data = process_data(otb_files, is_otb=True) if otb_files else pd.DataFrame()
 
 if not prod_data.empty:
     latest_booking_date = prod_data['예약일'].max()
+    analysis_month = latest_booking_date.month  # 현재 데이터의 월 자동 인식
 
     def calc_metrics(df):
         total_sales = df['총매출액'].sum()
@@ -60,7 +66,7 @@ if not prod_data.empty:
         adr = room_sales / rn if rn > 0 else 0
         return total_sales, room_sales, rn, adr
 
-    # --- 메인 대시보드 함수 (무삭제 보장) ---
+    # --- 메인 대시보드 함수 (과거 실적 정밀 대조 및 뾰족한 AI 탑재) ---
     def render_booking_dashboard(target_df, compare_df, title_label, current_label, prev_label):
         def get_delta_pct(curr, prev):
             if prev == 0: return "N/A"
@@ -74,23 +80,25 @@ if not prod_data.empty:
 
         st.subheader(f"✅ [{title_label} TOTAL 예약 성과]")
         
-        # 🚀 [v11.6 로직 보존] Monthly 탭일 경우 목표 달성 게이지 표시
+        # 🚀 [v11.8 추가] Monthly 탭일 경우 해당 월 타겟 자동 매칭 및 게이지 표시
         if title_label == "MONTHLY":
+            curr_month_target = targets.get(analysis_month, {"rev_won": 1200000000, "rn": 1600})
+            st.info(f"📊 {analysis_month}월 경영 목표 대비 달성 현황")
             gauge_col1, gauge_col2 = st.columns(2)
             with gauge_col1:
-                rev_pct = (t_tot / target_rev_won) * 100 if target_rev_won > 0 else 0
+                rev_pct = (t_tot / curr_month_target['rev_won']) * 100 if curr_month_target['rev_won'] > 0 else 0
                 fig_rev = go.Figure(go.Indicator(
                     mode = "gauge+number", value = rev_pct,
-                    title = {'text': "매출 목표 달성률 (%)"},
+                    title = {'text': f"{analysis_month}월 매출 달성률 (%)"},
                     gauge = {'axis': {'range': [0, 100]}, 'bar': {'color': "#1f77b4"}}
                 ))
                 fig_rev.update_layout(height=250, margin=dict(t=50, b=0, l=30, r=30))
                 st.plotly_chart(fig_rev, use_container_width=True)
             with gauge_col2:
-                rn_pct = (t_rn / target_rn_input) * 100 if target_rn_input > 0 else 0
+                rn_pct = (t_rn / curr_month_target['rn']) * 100 if curr_month_target['rn'] > 0 else 0
                 fig_rn = go.Figure(go.Indicator(
                     mode = "gauge+number", value = rn_pct,
-                    title = {'text': "RN 목표 달성률 (%)"},
+                    title = {'text': f"{analysis_month}월 RN 달성률 (%)"},
                     gauge = {'axis': {'range': [0, 100]}, 'bar': {'color': "#2ca02c"}}
                 ))
                 fig_rn.update_layout(height=250, margin=dict(t=50, b=0, l=30, r=30))
@@ -115,7 +123,7 @@ if not prod_data.empty:
         g2.metric("Group ADR", f"{gc_adr:,.0f}원")
         st.divider()
 
-        # 4~5구역: 조식 분석
+        # 4~5구역: 조식 분석 (지정 거래처 14개 로직)
         st.subheader("🍳 조식 포함 비중 및 지정 채널 선택률")
         bf1, bf2 = st.columns(2)
         t_all, t_bf = len(target_df), len(target_df[target_df['breakfast_status']=='조식포함'])
@@ -164,25 +172,24 @@ if not prod_data.empty:
         if not global_ota.empty:
             st.plotly_chart(px.bar(global_ota, x="account", color="country", title="글로벌 OTA 국적 비중", barmode="stack", text_auto=True), use_container_width=True)
 
-        # AI 전략 리포트
+        # AI 전략 리포트 (목표 자동 인식)
         st.write("---")
         if st.button(f"🤖 AI 전문가 [{title_label}] 전략 리포트", key=f"ai_btn_{title_label}"):
             if api_key:
-                with st.spinner(f"AI가 {title_label} 성과를 진단 중입니다..."):
-                    lead_context = lead_adr.set_index('lead_group')['ADR'].to_dict()
+                with st.spinner(f"AI가 {analysis_month}월 목표 대비 성과를 분석 중입니다..."):
+                    m_target = targets.get(analysis_month, {"rev_won": 1200000000, "rn": 1600})
                     prompt = f"""
-                    [엠버퓨어힐 GM 브리핑 - {title_label}]
-                    - 월 목표: 매출 {target_rev_won:,.0f}원 / 룸나잇 {target_rn_input}RN
-                    - 현재 실적: 매출 {t_tot:,.0f}원 ({(t_tot/target_rev_won*100 if target_rev_won>0 else 0):.1f}%) / 판매 {t_rn}RN ({(t_rn/target_rn_input*100 if target_rn_input>0 else 0):.1f}%)
-                    - 평균 ADR: {t_adr:,.0f}원 / 리드타임별 ADR: {lead_context}
-                    
-                    위 데이터를 기반으로 목표 달성을 위해 남은 기간 동안 어떤 채널의 가격을 조정하거나 어떤 마케팅에 집중해야 할지 뾰족하게 제안해줘.
+                    [엠버퓨어힐 GM 브리핑 - {analysis_month}월]
+                    - 경영 목표: 매출 {m_target['rev_won']:,.0f}원 / 룸나잇 {m_target['rn']}RN
+                    - 현재 실적: 매출 {t_tot:,.0f}원 / 판매 {t_rn}RN
+                    - 평균 ADR: {t_adr:,.0f}원
+                    위 데이터를 기반으로 남은 기간 경영 목표 달성을 위한 뾰족한 전략을 제안해줘.
                     """
                     st.info(get_ai_insight(api_key, prompt))
             else: st.warning(" Gemini API Key를 입력하세요.")
 
     # --- 탭 구성 ---
-    tab_d, tab_w, tab_m, tab_f = st.tabs(["📅 Daily", "📊 Weekly", "📈 Monthly", "🚀 Future OTB (전략)"])
+    tab_d, tab_w, tab_m, tab_f = st.tabs(["📅 Daily", "📊 Weekly", "📈 Monthly", "🚀 Future OTB (전략관제)"])
 
     with tab_d: render_booking_dashboard(prod_data[prod_data['예약일'] == latest_booking_date], prod_data[prod_data['예약일'] == latest_booking_date - timedelta(days=1)], "DAILY", "오늘", "어제")
     with tab_w:
@@ -200,8 +207,7 @@ if not prod_data.empty:
             st.subheader("🚀 미래 수익 관리 (Revenue Management) 전략")
             otb_future = otb_data[otb_data['일자_dt'] >= latest_booking_date]
             f_o1, f_o2, f_o3, f_o4 = st.columns(4)
-            future_occ = otb_future['점유율'].mean()
-            f_o1.metric("향후 평균 점유율", f"{future_occ:.1f}%")
+            f_o1.metric("향후 평균 점유율", f"{otb_future['점유율'].mean():.1f}%")
             f_o2.metric("향후 평균 ADR", f"{otb_future['합계_ADR'].mean():,.0f}원")
             f_o3.metric("최고 매출 일자", f"{otb_future.loc[otb_future['합계_매출'].idxmax(), '일자']}")
             f_o4.metric("누적 대기 매출", f"{otb_future['합계_매출'].sum():,.0f}원")
@@ -225,9 +231,7 @@ if not prod_data.empty:
             if st.button("🤖 AI 전문가 미래 수익 전략 리포트"):
                 if api_key:
                     with st.spinner("미래 데이터를 진단 중..."):
-                        low_occ = otb_future[otb_future['점유율'] < target_occ * 0.5]['일자'].tolist()[:5]
-                        high_occ_low_adr = otb_future[(otb_future['점유율'] > target_occ) & (otb_future['합계_ADR'] < target_adr)]['일자'].tolist()[:5]
-                        context = f"평균점유율:{future_occ:.1f}%, 부진날짜:{low_occ}, 기회손실날짜:{high_occ_low_adr}"
-                        st.info(get_ai_insight(api_key, context + " 위 데이터를 바탕으로 가격 전략을 제안해줘."))
+                        high_occ = otb_future[otb_future['점유율'] > 80]['일자'].tolist()[:5]
+                        st.info(get_ai_insight(api_key, f"평균점유율:{otb_future['점유율'].mean():.1f}%, 만실임박:{high_occ} 데이터를 기반으로 가격 전략을 제안해줘."))
         else: st.warning("온더북 파일을 업로드하세요.")
 else: st.info("실적 파일을 업로드하여 경영 관제를 시작하세요.")
