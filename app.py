@@ -5,7 +5,7 @@ from ai_engine import get_ai_insight
 st.set_page_config(page_title="퓨어힐 PMS AI 비서", layout="wide")
 st.title("🏨 퓨어힐 PMS AI 분석 비서")
 
-API_KEY = "AIzaSyA7JanbIy4xRr0ICGO8pDOqZvxq2mPPg20" 
+API_KEY = "AIzaSyBeEUNkXOCwM5ytP8idEIlgH9DtLLf9-ck" 
 
 uploaded_file = st.file_uploader("PMS 파일을 올려주세요", type=['csv', 'xlsx'])
 
