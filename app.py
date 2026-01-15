@@ -6,7 +6,7 @@ from datetime import timedelta
 import pandas as pd
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 경영분석 v9.1", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 경영분석 v9.3", layout="wide")
 
 # 대시보드 스타일
 st.markdown("""<style>.stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; border: 1px solid #e1e4e8; }</style>""", unsafe_allow_html=True)
@@ -17,10 +17,10 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.info("입력하신 키는 세션 종료 시 자동으로 파기됩니다.")
     st.divider()
-    st.caption("v9.1: 조식 분석 에러 수정 및 전체 지표 통합")
+    st.caption("v9.3: 전체/FIT 조식 비중 지표화 및 거래처 필터링")
 
 st.title("🏛️ 엠버퓨어힐 호텔 경영 실적 분석 대시보드")
-st.caption("예약 생성일 기준 실적 및 세그먼트별 조식 기여도 정밀 리포트")
+st.caption("예약 생성일 기준 실적 및 세그먼트/거래처별 조식 기여도 정밀 리포트")
 
 # 4. 파일 업로드
 uploaded_file = st.file_uploader("전체 PMS 데이터를 올려주세요 (CSV, XLSX)", type=['csv', 'xlsx'])
@@ -88,7 +88,64 @@ if uploaded_file:
 
             st.divider()
 
-            # --- 4구역: 행동 지표 (FIT 중심) ---
+            # --- 4구역: 조식 핵심 지표 (사장님 요청사항: 전체 및 FIT 분리) ---
+            st.subheader(f"🍳 [{title_label}] 조식 포함 비중 핵심 요약")
+            bf1, bf2, bf3 = st.columns(3)
+            
+            # 전체 조식 비중
+            total_count = len(target_df)
+            bf_total_count = len(target_df[target_df['breakfast_status'] == '조식포함'])
+            bf_total_ratio = (bf_total_count / total_count * 100) if total_count > 0 else 0
+            
+            # FIT 조식 비중
+            fit_total_count = len(f_curr)
+            bf_fit_count = len(f_curr[f_curr['breakfast_status'] == '조식포함'])
+            bf_fit_ratio = (bf_fit_count / fit_total_count * 100) if fit_total_count > 0 else 0
+            
+            bf1.metric("전체 예약 중 조식 비중", f"{bf_total_ratio:.1f}%", f"{bf_total_count}건 / {total_count}건")
+            bf2.metric("FIT 예약 중 조식 비중", f"{bf_fit_ratio:.1f}%", f"{bf_fit_count}건 / {fit_total_count}건")
+            bf3.write("💡 그룹을 제외한 개별 고객(FIT)의 조식 선택 성향을 확인하세요.")
+
+            st.divider()
+
+            # --- 5구역: 조식 상세 그래프 (지정 거래처 필터링) ---
+            st.subheader("📈 지정 거래처별 조식 포함 예약 비중")
+            
+            # 사장님 요청 거래처 리스트
+            target_accounts = [
+                '아고다', '부킹닷컴', '익스피디아 e.c', '익스피디아 h.c', '트립닷컴', 
+                '네이버', '홈페이지', '야놀자', '호텔타임', '트립비토즈', 
+                '마이리얼트립', '올마이투어', '타이드스퀘어', 'personal'
+            ]
+            
+            def normalize_acc(x):
+                return str(x).lower().replace(" ", "")
+
+            target_df['acc_norm'] = target_df['account'].apply(normalize_acc)
+            normalized_targets = [normalize_acc(a) for a in target_accounts]
+            
+            filtered_acc_df = target_df[target_df['acc_norm'].isin(normalized_targets)]
+            
+            if not filtered_acc_df.empty:
+                acc_bf_stats = filtered_acc_df.groupby(['account', 'breakfast_status']).size().unstack(fill_value=0)
+                if '조식포함' in acc_bf_stats.columns:
+                    row_totals = acc_bf_stats.sum(axis=1)
+                    acc_bf_stats['조식선택률'] = (acc_bf_stats['조식포함'] / row_totals) * 100
+                    acc_bf_stats['예약건수'] = row_totals
+                    acc_bf_plot = acc_bf_stats.reset_index().sort_values('조식선택률', ascending=False)
+                    
+                    fig_acc_bf = px.bar(acc_bf_plot, x='조식선택률', y='account', orientation='h',
+                                        text=acc_bf_plot.apply(lambda r: f"{r['조식선택률']:.1f}% ({int(r['예약건수'])}건)", axis=1),
+                                        color='조식선택률', color_continuous_scale='YlOrRd')
+                    st.plotly_chart(fig_acc_bf, use_container_width=True)
+                else:
+                    st.info("지정된 거래처 중 조식 포함 예약이 없습니다.")
+            else:
+                st.info("지정된 거래처 데이터가 없습니다.")
+
+            st.divider()
+
+            # --- 6구역: 행동 지표 (FIT 중심) ---
             st.subheader("📊 고객 행동 분석 (FIT 고객 중심)")
             b1, b2, b3 = st.columns(3)
             fit_lead = f_curr['lead_time'].mean() if not f_curr.empty else 0
@@ -100,41 +157,9 @@ if uploaded_file:
 
             st.divider()
 
-            # --- 5구역: 조식 비중 분석 ---
-            st.subheader("🍳 조식 포함 비중 분석")
-            col_bf1, col_bf2 = st.columns(2)
-            
-            with col_bf1:
-                st.write("**전체 vs FIT 조식 포함 비중**")
-                bf_all = target_df['breakfast_status'].value_counts().reset_index()
-                bf_fit = f_curr['breakfast_status'].value_counts().reset_index()
-                bf_fit['segment'] = 'FIT'
-                bf_all['segment'] = 'TOTAL'
-                bf_combined = pd.concat([bf_all, bf_fit])
-                fig_bf_pie = px.sunburst(bf_combined, path=['segment', 'breakfast_status'], values='count', 
-                                         color='breakfast_status', color_discrete_map={'조식포함':'#FFD700', '조식불포함':'#E1E4E8'})
-                st.plotly_chart(fig_bf_pie, use_container_width=True)
-
-            with col_bf2:
-                st.write("**거래처별 조식 포함 비중 (TOP 10)**")
-                acc_bf = target_df.groupby(['account', 'breakfast_status']).size().unstack(fill_value=0)
-                if '조식포함' in acc_bf.columns:
-                    # 문법 오류 수정: 바다코끼리 연산자 제거하고 표준 방식으로 계산
-                    row_sums = acc_bf.sum(axis=1)
-                    acc_bf['조식선택률'] = (acc_bf['조식포함'] / row_sums) * 100
-                    acc_bf_plot = acc_bf.sort_values('조식선택률', ascending=False).head(10).reset_index()
-                    fig_acc_bf = px.bar(acc_bf_plot, x='조식선택률', y='account', orientation='h', 
-                                        text_auto='.1f', title="거래처별 조식 포함 예약 비중 (%)",
-                                        color_continuous_scale='YlOrRd', color='조식선택률')
-                    st.plotly_chart(fig_acc_bf, use_container_width=True)
-                else:
-                    st.info("조식 포함 예약 데이터가 없습니다.")
-
-            st.divider()
-
-            # --- 6구역: 기존 시각화 그래프 5종 (무삭제) ---
+            # --- 7구역: 기존 시각화 그래프 5종 (무삭제 유지) ---
             st.subheader("📈 채널 및 거래처 심층 시각화")
-            pure_acc = f_curr[~f_curr['account'].str.contains('마이스|그룹', na=False)]
+            pure_acc = f_curr[~f_curr['account'].str.contains('마이스|그룹', na=False, case=False)]
             acc_stats = pure_acc.groupby('account').agg({'room_nights':'sum','객실매출액':'sum','los':'mean','lead_time':'mean'}).reset_index()
             acc_stats['ADR'] = acc_stats['객실매출액'] / acc_stats['room_nights']
 
@@ -159,7 +184,7 @@ if uploaded_file:
             if not global_ota.empty:
                 st.plotly_chart(px.bar(global_ota, x="account", color="country", barmode="stack", text_auto=True), use_container_width=True)
 
-        # --- 탭 구성 및 날짜 필터링 ---
+        # --- 탭 구성 ---
         tab1, tab2, tab3 = st.tabs(["📅 Daily (일간 예약)", "📊 Weekly (주간 예약)", "📈 Monthly (월간 예약)"])
 
         with tab1:
@@ -181,8 +206,6 @@ if uploaded_file:
         st.divider()
         if st.button("🤖 AI 전문가 수익 & 조식 전략 리포트"):
             if api_key:
-                with st.spinner("AI가 수익 및 조식 비중을 분석 중입니다..."):
-                    summary = f"오늘 예약매출:{data[data['예약일']==latest_booking_date]['객실매출액'].sum():,.0f}원, 조식포함비중:{len(data[data['breakfast_status']=='조식포함'])/len(data)*100:.1f}%"
-                    st.info(get_ai_insight(api_key, summary + " 조식 포함 비중과 거래처별 특성을 분석하여 부대시설 매출 증대 방안을 제안해줘."))
-            else:
-                st.warning("사이드바에 API Key를 넣어주세요.")
+                with st.spinner("AI가 분석 중입니다..."):
+                    summary = f"전체조식비율:{bf_total_ratio:.1f}%, FIT조식비율:{bf_fit_ratio:.1f}%"
+                    st.info(get_ai_insight(api_key, summary + " 조식 비중을 분석하여 업셀링 전략을 제안해줘."))
