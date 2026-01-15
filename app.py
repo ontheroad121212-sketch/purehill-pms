@@ -7,7 +7,7 @@ from datetime import timedelta
 import pandas as pd
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 통합 관제 v10.8", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 경영통제 v11.0", layout="wide")
 
 # 대시보드 스타일
 st.markdown("""
@@ -17,15 +17,19 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 2. 사이드바
+# 2. 사이드바 (GM 전용 설정창)
 with st.sidebar:
-    st.header("⚙️ 시스템 설정")
+    st.header("⚙️ GM 경영 설정")
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.divider()
-    st.info("💡 실적 파일 1개와 OTB 파일 여러 개(다중 선택)를 동시에 선택해서 올리세요.")
-    st.caption("v10.8: 데일리/위클리/먼슬리/OTB 개별 AI 분석 탑재")
+    st.subheader("💸 채널 수수료 설정 (%)")
+    commission_ota = st.slider("Global OTA (아고다 등)", 10, 25, 17)
+    commission_etc = st.slider("기타 대행사/채널", 0, 20, 10)
+    st.info("💡 홈페이지/Personal은 수수료 0%로 자동 계산됩니다.")
+    st.divider()
+    st.caption("v11.0: GM 수익 통제 모듈 및 전 탭 AI 탑재")
 
-st.title("🏛️ 엠버퓨어힐 호텔 경영 관제 및 미래 전략")
+st.title("🏛️ 엠버퓨어힐 호텔 경영 실적 및 미래 수익 통제")
 
 # 3. 파일 업로드 구역
 col_up1, col_up2 = st.columns(2)
@@ -48,7 +52,7 @@ if not prod_data.empty:
         adr = room_sales / rn if rn > 0 else 0
         return total_sales, room_sales, rn, adr
 
-    # --- 메인 대시보드 함수 (무삭제 + AI 분석 버튼 통합) ---
+    # --- 메인 대시보드 함수 (GM 수익 분석 모듈 통합 - 무삭제) ---
     def render_booking_dashboard(target_df, compare_df, title_label, current_label, prev_label):
         def get_delta_pct(curr, prev):
             if prev == 0: return "N/A"
@@ -60,16 +64,16 @@ if not prod_data.empty:
         p_tot, p_room, p_rn, p_adr = calc_metrics(compare_df)
 
         # 1구역: TOTAL 실적 대조
-        st.subheader(f"✅ [{title_label} TOTAL 예약실적]")
+        st.subheader(f"✅ [{title_label} TOTAL 실적 대조]")
         st.caption(f"기준: {current_label} (비교대상: {prev_label})")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"총 예약금액", f"{t_tot:,.0f}원", delta=f"{get_delta_pct(t_tot, p_tot)} (전기: {p_tot:,.0f})")
-        c2.metric(f"순수 객실매출", f"{t_room:,.0f}원", delta=f"{get_delta_pct(t_room, p_room)} (전기: {p_room:,.0f})")
-        c3.metric(f"판매 룸나잇", f"{t_rn:,.0f} RN", delta=f"{int(t_rn - p_rn):+d} RN (전기: {p_rn:,.0f})")
-        c4.metric(f"평균 ADR", f"{t_adr:,.0f}원", delta=f"{get_delta_pct(t_adr, p_adr)} (전기: {p_adr:,.0f})")
+        c1.metric("총 예약금액", f"{t_tot:,.0f}원", delta=f"{get_delta_pct(t_tot, p_tot)} (전기: {p_tot:,.0f})")
+        c2.metric("순수 객실매출", f"{t_room:,.0f}원", delta=f"{get_delta_pct(t_room, p_room)} (전기: {p_room:,.0f})")
+        c3.metric("판매 룸나잇", f"{t_rn:,.0f} RN", delta=f"{int(t_rn - p_rn):+d} RN (전기: {p_rn:,.0f})")
+        c4.metric("평균 ADR", f"{t_adr:,.0f}원", delta=f"{get_delta_pct(t_adr, p_adr)} (전기: {p_adr:,.0f})")
         st.write("---")
 
-        # 2~3구역: FIT & Group 상세
+        # 2구역: FIT & Group 상세
         st.subheader(f"👤 [{title_label} 세그먼트 상세]")
         fc_tot, fc_room, fc_rn, fc_adr = calc_metrics(f_curr)
         gc_tot, gc_room, gc_rn, gc_adr = calc_metrics(g_curr)
@@ -80,7 +84,28 @@ if not prod_data.empty:
         g2.metric("Group ADR", f"{gc_adr:,.0f}원")
         st.divider()
 
-        # 4~5구역: 조식 분석 (지정 거래처 필터링)
+        # 3구역: [GM 핵심] 채널별 순수익(Net Revenue) 분석
+        st.subheader("💰 거래처별 실질 수익성 분석 (수수료 차감 후)")
+        acc_net = target_df.groupby('account').agg({'객실매출액':'sum', 'room_nights':'sum'}).reset_index()
+        def calc_net(row):
+            acc = str(row['account']).upper()
+            if any(x in acc for x in ['AGODA', 'BOOKING', 'EXPEDIA', 'TRIP', '아고다', '부킹닷컴', '익스피디아']):
+                return row['객실매출액'] * (1 - commission_ota/100)
+            elif any(x in acc for x in ['홈페이지', 'PERSONAL', '직접']):
+                return row['객실매출액']
+            else:
+                return row['객실매출액'] * (1 - commission_etc/100)
+        acc_net['순매출액'] = acc_net.apply(calc_net, axis=1)
+        acc_net = acc_net.sort_values('순매출액', ascending=False).head(10)
+        
+        fig_net = go.Figure()
+        fig_net.add_trace(go.Bar(x=acc_net['account'], y=acc_net['객실매출액'], name='총매출(Gross)', marker_color='lightgrey'))
+        fig_net.add_trace(go.Bar(x=acc_net['account'], y=acc_net['순매출액'], name='순매출(Net)', marker_color='#007bff'))
+        fig_net.update_layout(barmode='overlay', title="총매출 vs 수수료 제외 순매출 (TOP 10)")
+        st.plotly_chart(fig_net, use_container_width=True)
+        st.write("---")
+
+        # 4구역: 조식 분석 (지정 거래처 필터링)
         st.subheader("🍳 조식 포함 비중 및 지정 채널 선택률")
         bf1, bf2 = st.columns(2)
         t_all, t_bf = len(target_df), len(target_df[target_df['breakfast_status']=='조식포함'])
@@ -93,16 +118,21 @@ if not prod_data.empty:
         target_df['acc_norm'] = target_df['account'].apply(normalize_acc)
         normalized_targets = [normalize_acc(a) for a in target_accounts]
         filtered_acc_df = target_df[target_df['acc_norm'].isin(normalized_targets)]
-        
         if not filtered_acc_df.empty:
             acc_bf_stats = filtered_acc_df.groupby(['account', 'breakfast_status']).size().unstack(fill_value=0).reset_index()
             if '조식포함' in acc_bf_stats.columns:
-                acc_bf_stats['총합계'] = acc_bf_stats.iloc[:, 1:].sum(axis=1)
-                acc_bf_stats['조식선택률'] = (acc_bf_stats['조식포함'] / acc_bf_stats['총합계']) * 100
-                acc_bf_plot = acc_bf_stats.sort_values('조식선택률', ascending=False)
-                acc_bf_plot['label'] = acc_bf_plot.apply(lambda r: f"{r['조식선택률']:.1f}% ({int(r['총합계'])}건)", axis=1)
-                st.plotly_chart(px.bar(acc_bf_plot, x='조식선택률', y='account', orientation='h', text='label', color='조식선택률', color_continuous_scale='YlOrRd'), use_container_width=True)
+                acc_bf_stats['total'] = acc_bf_stats.iloc[:, 1:].sum(axis=1)
+                acc_bf_stats['ratio'] = (acc_bf_stats['조식포함'] / acc_bf_stats['total']) * 100
+                st.plotly_chart(px.bar(acc_bf_stats.sort_values('ratio', ascending=False), x='ratio', y='account', orientation='h', text_auto='.1f', color='ratio', color_continuous_scale='YlOrRd'), use_container_width=True)
         st.divider()
+
+        # 5구역: 리드타임별 ADR 분석 (얼리버드 검증)
+        st.subheader("📅 예약 리드타임별 판매 단가(ADR) 분석")
+        target_df['lead_group'] = pd.cut(target_df['lead_time'], bins=[-1, 7, 14, 30, 60, 999], labels=['1주이내', '1-2주', '2-4주', '1-2개월', '2개월이상'])
+        lead_adr = target_df.groupby('lead_group').agg({'객실매출액':'sum', 'room_nights':'sum'}).reset_index()
+        lead_adr['ADR'] = lead_adr['객실매출액'] / lead_adr['room_nights']
+        st.plotly_chart(px.line(lead_adr, x='lead_group', y='ADR', markers=True, title="예약 시점에 따른 평균 단가 추이"), use_container_width=True)
+        st.write("---")
 
         # 6~7구역: 행동 분석 및 그래프 5종
         st.subheader("📈 고객 행동 및 채널별 심층 시각화")
@@ -119,88 +149,65 @@ if not prod_data.empty:
         with g_col1: st.plotly_chart(px.bar(acc_stats.sort_values('room_nights').tail(10), x='room_nights', y='account', orientation='h', title="거래처별 룸나잇", text_auto=True, color_continuous_scale='Blues', color='room_nights'), use_container_width=True)
         with g_col2: st.plotly_chart(px.bar(acc_stats.sort_values('ADR').tail(10), x='ADR', y='account', orientation='h', title="거래처별 ADR", text_auto=',.0f', color_continuous_scale='Greens', color='ADR'), use_container_width=True)
         
-        g_col3, g_col4 = st.columns(2)
-        with g_col3: st.plotly_chart(px.bar(acc_stats.sort_values('los').tail(10), x='los', y='account', orientation='h', title="거래처별 평균 LOS", text_auto='.1f', color_continuous_scale='Purples', color='los'), use_container_width=True)
-        with g_col4: st.plotly_chart(px.bar(acc_stats.sort_values('lead_time').tail(10), x='lead_time', y='account', orientation='h', title="거래처별 평균 리드타임", text_auto='.1f', color_continuous_scale='Oranges', color='lead_time'), use_container_width=True)
-
         global_ota = f_curr[f_curr['is_global_ota'] == True]
         if not global_ota.empty:
             st.plotly_chart(px.bar(global_ota, x="account", color="country", title="글로벌 OTA 국적 비중", barmode="stack", text_auto=True), use_container_width=True)
 
-        # 🚀 [v10.8 추가] 각 탭별 전용 AI 분석 버튼
+        # 🚀 [v11.0 추가] 각 탭별 전용 AI 분석 버튼
         st.write("---")
-        if st.button(f"🤖 AI 전문가 [{title_label}] 실적 분석 리포트", key=f"ai_btn_{title_label}"):
+        if st.button(f"🤖 AI GM [{title_label}] 경영 리포트", key=f"ai_btn_{title_label}"):
             if api_key:
-                with st.spinner(f"AI가 {title_label} 성과를 분석 중입니다..."):
-                    summary = f"총매출:{t_tot:,.0f}원, 객실매출:{t_room:,.0f}원, RN:{t_rn:,.0f}, ADR:{t_adr:,.0f}원, 조식비중:{t_bf/t_all*100:.1f}%"
-                    st.info(get_ai_insight(api_key, f"{summary} 이 데이터를 바탕으로 성과 분석과 매출 증대 전략을 제안해줘."))
-            else: st.warning("사이드바에 Gemini API Key를 입력하세요.")
+                with st.spinner(f"AI GM이 {title_label} 실적을 진단 중입니다..."):
+                    context = f"총매출:{t_tot:,.0f}원, 순매출(수수료제외):{acc_net['순매출액'].sum():,.0f}원, ADR:{t_adr:,.0f}원, 조식비중:{t_bf/t_all*100:.1f}%"
+                    st.info(get_ai_insight(api_key, f"{context} 이 데이터를 바탕으로 채널 믹스 조정 및 수익성 강화 방안을 제안해줘."))
+            else: st.warning("Gemini API Key를 입력하세요.")
 
-    # --- 탭 구성 ---
-    tab_d, tab_w, tab_m, tab_f = st.tabs(["📅 Daily 실적", "📊 Weekly 실적", "📈 Monthly 실적", "🚀 Future OTB (고도화)"])
+    # --- 탭 구성 (에러 수정 완료) ---
+    tab_d, tab_w, tab_m, tab_f = st.tabs(["📅 Daily", "📊 Weekly", "📈 Monthly", "🚀 Future OTB (수익관리)"])
 
-    with tab_d:
-        st.info(f"오늘 예약 생성일 기준: {latest_booking_date.date()}")
-        render_booking_dashboard(prod_data[prod_data['예약일'] == latest_booking_date], prod_data[prod_data['예약일'] == latest_booking_date - timedelta(days=1)], "DAILY", "오늘", "어제")
-    
+    with tab_d: render_booking_dashboard(prod_data[prod_data['예약일'] == latest_booking_date], prod_data[prod_data['예약일'] == latest_booking_date - timedelta(days=1)], "DAILY", "오늘", "어제")
     with tab_w:
         w_start = latest_booking_date - timedelta(days=latest_booking_date.weekday())
         render_booking_dashboard(prod_data[prod_data['예약일'] >= w_start], prod_data[(prod_data['예약일'] >= w_start - timedelta(days=7)) & (prod_data['예약일'] < w_start)], "WEEKLY", "이번주", "지난주")
-        
     with tab_m:
         m_start = latest_booking_date.replace(day=1)
         pm_start = (m_start - timedelta(days=1)).replace(day=1)
         render_booking_dashboard(prod_data[prod_data['예약일'] >= m_start], prod_data[(prod_data['예약일'] >= pm_start) & (prod_data['예약일'] < m_start)], "MONTHLY", "이번달", "지난달")
 
-    # --- 탭 4: 미래 OTB 고도화 분석 ---
+    # --- 미래 OTB 탭 (GM 고도화 로직 통합) ---
     with tab_f:
         if not otb_data.empty:
-            st.subheader("🚀 미래 예약 현황 (On-the-Book) 고도화 분석")
+            st.subheader("🚀 GM 미래 수익 관리 (Revenue Management)")
             otb_future = otb_data[otb_data['일자_dt'] >= latest_booking_date]
-            
             f_o1, f_o2, f_o3, f_o4 = st.columns(4)
             future_occ = otb_future['점유율'].mean()
             f_o1.metric("향후 평균 점유율", f"{future_occ:.1f}%")
             f_o2.metric("향후 평균 ADR", f"{otb_future['합계_ADR'].mean():,.0f}원")
-            f_o3.metric("최고 매출 일자", f"{otb_future.loc[otb_future['합계_매출'].idxmax(), '일자'] if not otb_future.empty else 'N/A'}")
+            f_o3.metric("최고 매출 예상일", f"{otb_future.loc[otb_future['합계_매출'].idxmax(), '일자']}")
             f_o4.metric("누적 대기 매출", f"{otb_future['합계_매출'].sum():,.0f}원")
             
             st.write("---")
-            st.subheader("🛌 미래 날짜별 개인(FIT) vs 단체(Group) 예약 비중")
-            fig_mix = go.Figure()
-            fig_mix.add_trace(go.Scatter(x=otb_future['일자_dt'], y=otb_future['개인_객실'], name='개인(FIT)', stackgroup='one', fill='tonexty'))
-            fig_mix.add_trace(go.Scatter(x=otb_future['일자_dt'], y=otb_future['단체_객실'], name='단체(Group)', stackgroup='one', fill='tonexty'))
-            fig_mix.update_layout(title="미래 공급 구성 (Room Nights)", hovermode='x unified')
-            st.plotly_chart(fig_mix, use_container_width=True)
+            st.subheader("🛌 미래 날짜별 예약 점유율 및 ADR 교차 분석")
+            fig_otb = go.Figure()
+            fig_otb.add_trace(go.Bar(x=otb_future['일자_dt'], y=otb_future['점유율'], name='점유율(%)', marker_color='#a2d2ff'))
+            fig_otb.add_trace(go.Scatter(x=otb_future['일자_dt'], y=otb_future['합계_ADR'], name='ADR(원)', yaxis='y2', line=dict(color='#FF4B4B', width=3)))
+            fig_otb.update_layout(yaxis2=dict(overlaying='y', side='right'), title="Pace 분석: 점유율(Bar) vs ADR(Line)", hovermode='x unified')
+            st.plotly_chart(fig_otb, use_container_width=True)
 
-            st.write("---")
-            st.subheader("🗓️ 요일별 미래 점유율 및 단가 패턴")
-            dow_map = {'Mon':0, 'Tue':1, 'Wed':2, 'Thu':3, 'Fri':4, 'Sat':5, 'Sun':6}
-            dow_stats = otb_future.copy()
-            dow_stats['dow_num'] = dow_stats['요일'].map(dow_map)
-            dow_summary = dow_stats.groupby(['dow_num', '요일']).agg({'점유율':'mean', '합계_ADR':'mean'}).reset_index().sort_values('dow_num')
-            col_d1, col_d2 = st.columns(2)
-            with col_d1: st.plotly_chart(px.bar(dow_summary, x='요일', y='점유율', title="요일별 평균 점유율(%)", color='점유율', color_continuous_scale='Purples'), use_container_width=True)
-            with col_d2: st.plotly_chart(px.line(dow_summary, x='요일', y='합계_ADR', title="요일별 평균 ADR(원)", markers=True), use_container_width=True)
+            col_sub1, col_sub2 = st.columns(2)
+            with col_sub1:
+                st.write("**🗓️ 요일별 미래 예약 패턴**")
+                dow_sum = otb_future.groupby('요일')['점유율'].mean().reindex(['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])
+                st.plotly_chart(px.bar(dow_sum, color_discrete_sequence=['#9b59b6']), use_container_width=True)
+            with col_sub2:
+                st.write("**💸 수익 최적화 매트릭스 (Yield Scatter)**")
+                st.plotly_chart(px.scatter(otb_future, x='점유율', y='합계_ADR', size='합계_매출', color='요일', hover_name='일자'), use_container_width=True)
 
-            st.write("---")
-            st.subheader("💸 수익 최적화 매트릭스 (Yield Scatter)")
-            fig_yield = px.scatter(otb_future, x='점유율', y='합계_ADR', size='합계_매출', color='요일', 
-                                   hover_name='일자', title="점유율 대비 가격 적정성 분석 (원의 크기는 매출액)",
-                                   labels={'점유율':'점유율(%)', '합계_ADR':'객단가(ADR)'},
-                                   category_orders={"요일": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]})
-            fig_yield.add_hline(y=otb_future['합계_ADR'].mean(), line_dash="dot", annotation_text="평균 ADR")
-            fig_yield.add_vline(x=otb_future['점유율'].mean(), line_dash="dot", annotation_text="평균 점유율")
-            st.plotly_chart(fig_yield, use_container_width=True)
-
-            if st.button("🤖 AI 전문가 미래 수익 전략 리포트"):
+            if st.button("🤖 GM 전용 AI 미래 수익 리포트"):
                 if api_key:
-                    with st.spinner("미래 데이터를 분석 중..."):
-                        high_occ = otb_future[otb_future['점유율'] > 80]['일자'].tolist()[:5]
-                        low_occ = otb_future[otb_future['점유율'] < 30]['일자'].tolist()[:5]
-                        context = f"평균점유율:{future_occ:.1f}%, 만실임박일:{high_occ}, 판촉필요:{low_occ}"
-                        st.info(get_ai_insight(api_key, context + " 요일별 점유율 패턴과 미래 OTB를 분석하여 수익 극대화 전략을 제안해줘."))
-        else:
-            st.warning("온더북 파일을 업로드하세요.")
+                    with st.spinner("AI GM이 미래 데이터를 진단 중..."):
+                        high_occ = otb_future[otb_future['점유율'] > 80]['일자'].tolist()[:3]
+                        st.info(get_ai_insight(api_key, f"평균점유율:{future_occ:.1f}%, 만실임박일:{high_occ} 를 기반으로 수익 극대화 가격 전략을 제안해줘."))
+        else: st.warning("온더북 파일을 업로드하세요.")
 else:
-    st.info("실적 파일을 업로드하여 분석을 시작하세요.")
+    st.info("실적 파일을 업로드하여 경영 관제를 시작하세요.")
