@@ -6,7 +6,7 @@ st.set_page_config(page_title="퓨어힐 PMS AI 대시보드", layout="wide")
 
 st.title("🏨 퓨어힐 PMS AI 분석 비서")
 
-# 사장님의 API Key를 여기에 넣으세요 (나중에는 보안 설정을 따로 할 수 있어요)
+# 사장님의 API Key를 넣으세요
 API_KEY = "AIzaSyA7JanbIy4xRr0ICGO8pDOqZvxq2mPPg20" 
 
 uploaded_file = st.file_uploader("PMS 파일을 올려주세요", type=['csv', 'xlsx'])
@@ -14,29 +14,34 @@ uploaded_file = st.file_uploader("PMS 파일을 올려주세요", type=['csv', '
 if uploaded_file:
     data = process_data(uploaded_file)
     
-    # 숫자 지표
-    c1, c2, c3 = st.columns(3)
-    c1.metric("총 예약", f"{len(data)}건")
-    c2.metric("평균 리드타임", f"{data['lead_time'].mean():.1f}일")
-    c3.metric("평균 숙박일수", f"{data['los'].mean():.1f}박")
-    
-    st.divider()
-    
-    # AI 분석 버튼
-    if st.button("AI 전략 리포트 생성하기"):
-        with st.spinner("AI가 데이터를 분석 중입니다... 잠시만 기다려주세요."):
-            # 데이터 요약해서 AI에게 전달
-            summary = {
-                "total_bookings": len(data),
-                "avg_lead_time": data['lead_time'].mean(),
-                "avg_los": data['los'].mean(),
-                "segments": data['판매금액'].sum() if '판매금액' in data.columns else "데이터 없음"
-            }
-            
-            report = get_ai_insight(API_KEY, str(summary))
-            
-            st.subheader("🤖 AI 분석 결과")
-            st.write(report)
+    # 데이터가 잘 불러와졌는지 확인
+    if not data.empty:
+        st.divider()
+        c1, c2, c3 = st.columns(3)
+        
+        # 데이터가 없을 경우를 대비한 안전장치
+        avg_lead = data['lead_time'].mean() if 'lead_time' in data.columns else 0
+        avg_los = data['los'].mean() if 'los' in data.columns else 0
+        
+        c1.metric("총 예약", f"{len(data)}건")
+        c2.metric("평균 리드타임", f"{avg_lead:.1f}일")
+        c3.metric("평균 숙박일수", f"{avg_los:.1f}박")
+        
+        st.divider()
+        
+        if st.button("AI 전략 리포트 생성하기"):
+            with st.spinner("AI가 데이터를 분석 중입니다..."):
+                summary = f"""
+                - 총 예약 건수: {len(data)}
+                - 평균 리드타임: {avg_lead:.1f}일
+                - 평균 숙박일수: {avg_los:.1f}박
+                - 주요 예약 경로: {data['예약경로'].value_counts().head(3).to_dict() if '예약경로' in data.columns else '정보없음'}
+                """
+                report = get_ai_insight(API_KEY, summary)
+                st.subheader("🤖 AI 분석 결과")
+                st.write(report)
 
-    st.subheader("📋 전체 데이터 확인")
-    st.dataframe(data)
+        st.subheader("📋 전체 데이터 확인")
+        st.dataframe(data)
+    else:
+        st.error("데이터를 읽어오지 못했습니다. 파일 형식을 확인해주세요.")
