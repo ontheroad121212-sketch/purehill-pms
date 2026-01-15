@@ -5,7 +5,7 @@ from ai_engine import get_ai_insight
 from datetime import timedelta
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 경영분석 v8.5", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 경영분석 v8.6", layout="wide")
 
 # 대시보드 스타일 설정
 st.markdown("""
@@ -21,11 +21,11 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.info("입력하신 키는 세션 종료 시 자동으로 파기됩니다.")
     st.divider()
-    st.caption("v8.5: 예약일(Booking Date) 기준 비교 분석 시스템")
+    st.caption("v8.6: 예약일 기준 & FIT 전용 리드타임 분석 적용")
 
 # 3. 메인 타이틀
-st.title("🏛️ 엠버퓨어힐 호텔 경영 분석 대시보드")
-st.caption("예약 생성일 기준 실적 분석 및 채널별 고객 행태 정밀 리포트")
+st.title("🏛️ 엠버퓨어힐 호텔 경영 실적 분석 대시보드")
+st.caption("예약 생성일 기준 실적 분석 및 FIT 고객 리드타임 정밀 리포트")
 
 # 4. 파일 업로드
 uploaded_file = st.file_uploader("전체 PMS 데이터를 올려주세요 (CSV, XLSX)", type=['csv', 'xlsx'])
@@ -34,8 +34,7 @@ if uploaded_file:
     data = process_data(uploaded_file)
     
     if not data.empty:
-        # [중요] 모든 분석의 기준은 '예약일'입니다.
-        # 파일 내 가장 최근 예약 생성일을 '오늘'로 간주합니다.
+        # 모든 분석의 기준은 '예약일'입니다.
         latest_booking_date = data['예약일'].max()
         
         # 지표 계산용 헬퍼 함수
@@ -46,14 +45,20 @@ if uploaded_file:
             adr = room_sales / rn if rn > 0 else 0
             return total_sales, room_sales, rn, adr
 
-        # 대시보드 렌더링 함수 (사장님 요청 3단 지표 + 5개 그래프 무삭제)
+        # 대시보드 렌더링 함수
         def render_booking_dashboard(target_df, compare_df, title_label):
             # 비교 증감율 계산
             def get_delta_pct(curr, prev):
                 if prev == 0: return "N/A"
                 return f"{((curr - prev) / prev * 100):.1f}%"
 
-            # 지표 산출
+            # 데이터 세그먼트 분리
+            f_curr = target_df[target_df['market_segment'] == 'FIT']
+            f_prev = compare_df[compare_df['market_segment'] == 'FIT']
+            g_curr = target_df[target_df['market_segment'] == 'Group']
+            g_prev = compare_df[compare_df['market_segment'] == 'Group']
+
+            # 실적 산출
             t_tot, t_room, t_rn, t_adr = calc_metrics(target_df)
             p_tot, p_room, p_rn, p_adr = calc_metrics(compare_df)
 
@@ -68,8 +73,6 @@ if uploaded_file:
 
             # --- 2구역: FIT ---
             st.subheader(f"👤 [{title_label} FIT 예약]")
-            f_curr = target_df[target_df['market_segment'] == 'FIT']
-            f_prev = compare_df[compare_df['market_segment'] == 'FIT']
             fc_tot, fc_room, fc_rn, fc_adr = calc_metrics(f_curr)
             fp_tot, fp_room, fp_rn, fp_adr = calc_metrics(f_prev)
             
@@ -82,8 +85,6 @@ if uploaded_file:
 
             # --- 3구역: GROUP ---
             st.subheader(f"👥 [{title_label} GROUP 예약]")
-            g_curr = target_df[target_df['market_segment'] == 'Group']
-            g_prev = compare_df[compare_df['market_segment'] == 'Group']
             gc_tot, gc_room, gc_rn, gc_adr = calc_metrics(g_curr)
             gp_tot, gp_room, gp_rn, gp_adr = calc_metrics(g_prev)
             
@@ -95,19 +96,24 @@ if uploaded_file:
 
             st.divider()
 
-            # --- 4구역: 행동 지표 ---
-            st.subheader("📊 고객 행동 분석 (예약 특성)")
+            # --- 4구역: 행동 지표 (리드타임 FIT 전용 적용) ---
+            st.subheader("📊 고객 행동 분석 (FIT 고객 중심)")
             b1, b2, b3 = st.columns(3)
-            b1.metric("📅 평균 리드타임", f"{target_df['lead_time'].mean():.1f}일")
-            b2.metric("🌙 평균 숙박일수 (LOS)", f"{target_df['los'].mean():.1f}박")
-            nc = target_df['country'].value_counts(normalize=True).head(3) * 100
-            b3.metric("🌍 주요 국적비 (Top 3)", " / ".join([f"{k}: {v:.1f}%" for k, v in nc.to_dict().items()]))
+            
+            # [수정] 리드타임은 FIT 데이터에서만 추출 (그룹 데이터 배제)
+            fit_lead_time = f_curr['lead_time'].mean() if not f_curr.empty else 0
+            fit_los = f_curr['los'].mean() if not f_curr.empty else 0
+            
+            b1.metric("📅 평균 리드타임 (FIT)", f"{fit_lead_time:.1f}일", help="마이스/그룹을 제외한 순수 FIT 고객의 예약 속도")
+            b2.metric("🌙 평균 숙박일수 (FIT LOS)", f"{fit_los:.1f}박")
+            
+            nc = f_curr['country'].value_counts(normalize=True).head(3) * 100
+            b3.metric("🌍 FIT 주요 국적비", " / ".join([f"{k}: {v:.1f}%" for k, v in nc.to_dict().items()]))
 
             st.divider()
 
-            # --- 5구역: 그래프 5종 (거래처 정밀 분석) ---
+            # --- 5구역: 그래프 5종 (무삭제) ---
             st.subheader("📈 채널 및 거래처 심층 시각화")
-            # 마이스/그룹 제외 일반 거래처 필터링
             pure_acc = f_curr[~f_curr['account'].str.contains('마이스|그룹', na=False)]
             acc_stats = pure_acc.groupby('account').agg({'room_nights':'sum','객실매출액':'sum','los':'mean','lead_time':'mean'}).reset_index()
             acc_stats['ADR'] = acc_stats['객실매출액'] / acc_stats['room_nights']
@@ -129,11 +135,11 @@ if uploaded_file:
                 st.plotly_chart(px.bar(acc_stats.sort_values('lead_time').tail(10), x='lead_time', y='account', orientation='h', color='lead_time', text_auto='.1f', color_continuous_scale='Oranges'), use_container_width=True)
 
             st.write("**글로벌 OTA 국적 비중 분석**")
-            global_ota = target_df[target_df['is_global_ota'] == True]
+            global_ota = f_curr[f_curr['is_global_ota'] == True]
             if not global_ota.empty:
                 st.plotly_chart(px.bar(global_ota, x="account", color="country", barmode="stack", text_auto=True), use_container_width=True)
 
-        # --- 탭 구성 (예약일 기준 필터링) ---
+        # --- 탭 구성 (예약일 기준) ---
         tab1, tab2, tab3 = st.tabs(["📅 Daily (일간 예약)", "📊 Weekly (주간 예약)", "📈 Monthly (월간 예약)"])
 
         with tab1:
@@ -145,7 +151,6 @@ if uploaded_file:
             )
         
         with tab2:
-            # 이번 주 월요일 찾기
             this_week_start = latest_booking_date - timedelta(days=latest_booking_date.weekday())
             prev_week_start = this_week_start - timedelta(days=7)
             render_booking_dashboard(
@@ -155,9 +160,7 @@ if uploaded_file:
             )
             
         with tab3:
-            # 이번 달 1일 찾기
             this_month_start = latest_booking_date.replace(day=1)
-            # 지난 달 1일 찾기
             prev_month_end = this_month_start - timedelta(days=1)
             prev_month_start = prev_month_end.replace(day=1)
             render_booking_dashboard(
@@ -172,12 +175,9 @@ if uploaded_file:
             if api_key:
                 with st.spinner("AI가 예약 트렌드를 분석 중입니다..."):
                     summary = f"오늘 예약매출:{data[data['예약일']==latest_booking_date]['객실매출액'].sum():,.0f}원"
-                    st.info(get_ai_insight(api_key, summary + " 예약 생성일 기준으로 전일/전주 대비 성과를 분석해줘."))
+                    st.info(get_ai_insight(api_key, summary + " FIT 전용 리드타임을 분석하여 타겟 마케팅 시점을 제안해줘."))
             else:
                 st.warning("사이드바에 API Key를 넣어주세요.")
 
         with st.expander("📝 상세 데이터 시트 확인"):
             st.dataframe(data)
-
-    else:
-        st.error("데이터 로드 실패. 엑셀 형식을 확인하세요.")
