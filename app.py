@@ -3,9 +3,10 @@ import plotly.express as px
 from processor import process_data
 from ai_engine import get_ai_insight
 from datetime import timedelta
+import pandas as pd
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 경영분석 v9.0", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 경영분석 v9.1", layout="wide")
 
 # 대시보드 스타일
 st.markdown("""<style>.stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; border: 1px solid #e1e4e8; }</style>""", unsafe_allow_html=True)
@@ -16,10 +17,10 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.info("입력하신 키는 세션 종료 시 자동으로 파기됩니다.")
     st.divider()
-    st.caption("v9.0: 조식 비중 분석 및 거래처별 조식 선택률 모듈 추가")
+    st.caption("v9.1: 조식 분석 에러 수정 및 전체 지표 통합")
 
 st.title("🏛️ 엠버퓨어힐 호텔 경영 실적 분석 대시보드")
-st.caption("예약 생성일 기준 및 세그먼트별 조식 기여도 정밀 리포트")
+st.caption("예약 생성일 기준 실적 및 세그먼트별 조식 기여도 정밀 리포트")
 
 # 4. 파일 업로드
 uploaded_file = st.file_uploader("전체 PMS 데이터를 올려주세요 (CSV, XLSX)", type=['csv', 'xlsx'])
@@ -99,7 +100,7 @@ if uploaded_file:
 
             st.divider()
 
-            # --- [신규 추가] 5구역: 조식 비중 정밀 분석 ---
+            # --- 5구역: 조식 비중 분석 ---
             st.subheader("🍳 조식 포함 비중 분석")
             col_bf1, col_bf2 = st.columns(2)
             
@@ -116,10 +117,11 @@ if uploaded_file:
 
             with col_bf2:
                 st.write("**거래처별 조식 포함 비중 (TOP 10)**")
-                # 어카운트별로 조식포함 건수 / 전체건수 계산
                 acc_bf = target_df.groupby(['account', 'breakfast_status']).size().unstack(fill_value=0)
                 if '조식포함' in acc_bf.columns:
-                    acc_bf['조식선택률'] = (acc_bf['조식포함'] / acc_stats_row_sum := acc_bf.sum(axis=1)) * 100
+                    # 문법 오류 수정: 바다코끼리 연산자 제거하고 표준 방식으로 계산
+                    row_sums = acc_bf.sum(axis=1)
+                    acc_bf['조식선택률'] = (acc_bf['조식포함'] / row_sums) * 100
                     acc_bf_plot = acc_bf.sort_values('조식선택률', ascending=False).head(10).reset_index()
                     fig_acc_bf = px.bar(acc_bf_plot, x='조식선택률', y='account', orientation='h', 
                                         text_auto='.1f', title="거래처별 조식 포함 예약 비중 (%)",
