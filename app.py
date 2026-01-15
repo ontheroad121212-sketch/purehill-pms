@@ -42,6 +42,7 @@ prod_data = process_data(prod_file, is_otb=False) if prod_file else pd.DataFrame
 otb_data = process_data(otb_files, is_otb=True) if otb_files else pd.DataFrame()
 
 if not prod_data.empty:
+    # 실적 분석의 기준일
     latest_booking_date = prod_data['예약일'].max()
 
     def calc_metrics(df):
@@ -57,12 +58,14 @@ if not prod_data.empty:
             if prev == 0: return "N/A"
             return f"{((curr - prev) / prev * 100):.1f}%"
 
+        # 데이터 분리
         f_curr, f_prev = target_df[target_df['market_segment'] == 'FIT'], compare_df[compare_df['market_segment'] == 'FIT']
         g_curr, g_prev = target_df[target_df['market_segment'] == 'Group'], compare_df[compare_df['market_segment'] == 'Group']
+        
         t_tot, t_room, t_rn, t_adr = calc_metrics(target_df)
         p_tot, p_room, p_rn, p_adr = calc_metrics(compare_df)
 
-        # 1구역: TOTAL 성과
+        # 1구역: TOTAL 성과 대조
         st.subheader(f"✅ [{title_label} TOTAL 예약 성과]")
         st.caption(f"기준: {current_label} (비교대상: {prev_label})")
         c1, c2, c3, c4 = st.columns(4)
@@ -72,7 +75,7 @@ if not prod_data.empty:
         c4.metric("평균 ADR", f"{t_adr:,.0f}원", delta=f"{get_delta_pct(t_adr, p_adr)} (전기: {p_adr:,.0f})")
         st.write("---")
 
-        # 2~3구역: FIT & Group 상세
+        # 2~3구역: FIT & Group 상세 지표
         st.subheader(f"👤 [{title_label} 세그먼트 상세]")
         fc_tot, fc_room, fc_rn, fc_adr = calc_metrics(f_curr)
         gc_tot, gc_room, gc_rn, gc_adr = calc_metrics(g_curr)
@@ -83,7 +86,7 @@ if not prod_data.empty:
         g2.metric("Group ADR", f"{gc_adr:,.0f}원")
         st.divider()
 
-        # 4~5구역: 조식 분석 (14개 지정 거래처 무삭제)
+        # 4~5구역: 조식 분석 (지정 거래처 14개 필터링 로직 포함)
         st.subheader("🍳 조식 포함 비중 및 지정 채널 선택률")
         bf1, bf2 = st.columns(2)
         t_all, t_bf = len(target_df), len(target_df[target_df['breakfast_status']=='조식포함'])
@@ -106,7 +109,7 @@ if not prod_data.empty:
                 st.plotly_chart(px.bar(acc_bf_plot, x='ratio', y='account', orientation='h', text='label', color='ratio', color_continuous_scale='YlOrRd'), use_container_width=True)
         st.divider()
 
-        # 6구역: 리드타임별 ADR 분석 (수익 관리 핵심)
+        # 6구역: 리드타임별 ADR 분석 (GM 수익 관리 핵심)
         st.subheader("📅 예약 리드타임별 판매 단가(ADR) 분석")
         target_df['lead_group'] = pd.cut(target_df['lead_time'], bins=[-1, 7, 14, 30, 60, 999], labels=['1주이내', '1-2주', '2-4주', '1-2개월', '2개월이상'])
         lead_adr = target_df.groupby('lead_group', observed=False).agg({'객실매출액':'sum', 'room_nights':'sum'}).reset_index()
@@ -210,5 +213,4 @@ if not prod_data.empty:
                         """
                         st.info(get_ai_insight(api_key, context + " 위 데이터를 바탕으로 가격을 당장 올려야 할 날짜와 공격적인 판촉이 필요한 날짜를 콕 집어서 알려줘."))
         else: st.warning("온더북 파일을 업로드하세요.")
-else:
-    st.info("실적 파일을 업로드하여 경영 관제를 시작하세요.")
+else: st.info("실적 파일을 업로드하여 경영 관제를 시작하세요.")
