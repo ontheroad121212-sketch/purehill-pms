@@ -7,7 +7,7 @@ from datetime import timedelta
 import pandas as pd
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 통합 관제 v10.7", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 통합 관제 v10.8", layout="wide")
 
 # 대시보드 스타일
 st.markdown("""
@@ -23,7 +23,7 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.divider()
     st.info("💡 실적 파일 1개와 OTB 파일 여러 개(다중 선택)를 동시에 선택해서 올리세요.")
-    st.caption("v10.7: OTB 고도화 분석 및 실적 대조 통합 최종본")
+    st.caption("v10.8: 데일리/위클리/먼슬리/OTB 개별 AI 분석 탑재")
 
 st.title("🏛️ 엠버퓨어힐 호텔 경영 관제 및 미래 전략")
 
@@ -48,7 +48,7 @@ if not prod_data.empty:
         adr = room_sales / rn if rn > 0 else 0
         return total_sales, room_sales, rn, adr
 
-    # --- 메인 대시보드 함수 (과거 실적 분석 구역) ---
+    # --- 메인 대시보드 함수 (무삭제 + AI 분석 버튼 통합) ---
     def render_booking_dashboard(target_df, compare_df, title_label, current_label, prev_label):
         def get_delta_pct(curr, prev):
             if prev == 0: return "N/A"
@@ -100,7 +100,8 @@ if not prod_data.empty:
                 acc_bf_stats['총합계'] = acc_bf_stats.iloc[:, 1:].sum(axis=1)
                 acc_bf_stats['조식선택률'] = (acc_bf_stats['조식포함'] / acc_bf_stats['총합계']) * 100
                 acc_bf_plot = acc_bf_stats.sort_values('조식선택률', ascending=False)
-                st.plotly_chart(px.bar(acc_bf_plot, x='조식선택률', y='account', orientation='h', text=acc_bf_plot.apply(lambda r: f"{r['조식선택률']:.1f}% ({int(r['총합계'])}건)", axis=1), color='조식선택률', color_continuous_scale='YlOrRd'), use_container_width=True)
+                acc_bf_plot['label'] = acc_bf_plot.apply(lambda r: f"{r['조식선택률']:.1f}% ({int(r['총합계'])}건)", axis=1)
+                st.plotly_chart(px.bar(acc_bf_plot, x='조식선택률', y='account', orientation='h', text='label', color='조식선택률', color_continuous_scale='YlOrRd'), use_container_width=True)
         st.divider()
 
         # 6~7구역: 행동 분석 및 그래프 5종
@@ -126,6 +127,15 @@ if not prod_data.empty:
         if not global_ota.empty:
             st.plotly_chart(px.bar(global_ota, x="account", color="country", title="글로벌 OTA 국적 비중", barmode="stack", text_auto=True), use_container_width=True)
 
+        # 🚀 [v10.8 추가] 각 탭별 전용 AI 분석 버튼
+        st.write("---")
+        if st.button(f"🤖 AI 전문가 [{title_label}] 실적 분석 리포트", key=f"ai_btn_{title_label}"):
+            if api_key:
+                with st.spinner(f"AI가 {title_label} 성과를 분석 중입니다..."):
+                    summary = f"총매출:{t_tot:,.0f}원, 객실매출:{t_room:,.0f}원, RN:{t_rn:,.0f}, ADR:{t_adr:,.0f}원, 조식비중:{t_bf/t_all*100:.1f}%"
+                    st.info(get_ai_insight(api_key, f"{summary} 이 데이터를 바탕으로 성과 분석과 매출 증대 전략을 제안해줘."))
+            else: st.warning("사이드바에 Gemini API Key를 입력하세요.")
+
     # --- 탭 구성 ---
     tab_d, tab_w, tab_m, tab_f = st.tabs(["📅 Daily 실적", "📊 Weekly 실적", "📈 Monthly 실적", "🚀 Future OTB (고도화)"])
 
@@ -148,7 +158,6 @@ if not prod_data.empty:
             st.subheader("🚀 미래 예약 현황 (On-the-Book) 고도화 분석")
             otb_future = otb_data[otb_data['일자_dt'] >= latest_booking_date]
             
-            # 1. 상단 요약 지표
             f_o1, f_o2, f_o3, f_o4 = st.columns(4)
             future_occ = otb_future['점유율'].mean()
             f_o1.metric("향후 평균 점유율", f"{future_occ:.1f}%")
@@ -156,7 +165,6 @@ if not prod_data.empty:
             f_o3.metric("최고 매출 일자", f"{otb_future.loc[otb_future['합계_매출'].idxmax(), '일자'] if not otb_future.empty else 'N/A'}")
             f_o4.metric("누적 대기 매출", f"{otb_future['합계_매출'].sum():,.0f}원")
             
-            # 2. 개인(FIT) vs 단체(Group) 세그먼트 믹스 (Area Chart)
             st.write("---")
             st.subheader("🛌 미래 날짜별 개인(FIT) vs 단체(Group) 예약 비중")
             fig_mix = go.Figure()
@@ -165,21 +173,18 @@ if not prod_data.empty:
             fig_mix.update_layout(title="미래 공급 구성 (Room Nights)", hovermode='x unified')
             st.plotly_chart(fig_mix, use_container_width=True)
 
-            # 3. 요일별 미래 패턴 (DOW Analysis)
             st.write("---")
-            st.subheader("🗓️ 요일별 미래 점유율 및 단가 패턴 (장기 평균)")
+            st.subheader("🗓️ 요일별 미래 점유율 및 단가 패턴")
             dow_map = {'Mon':0, 'Tue':1, 'Wed':2, 'Thu':3, 'Fri':4, 'Sat':5, 'Sun':6}
             dow_stats = otb_future.copy()
             dow_stats['dow_num'] = dow_stats['요일'].map(dow_map)
             dow_summary = dow_stats.groupby(['dow_num', '요일']).agg({'점유율':'mean', '합계_ADR':'mean'}).reset_index().sort_values('dow_num')
-            
             col_d1, col_d2 = st.columns(2)
             with col_d1: st.plotly_chart(px.bar(dow_summary, x='요일', y='점유율', title="요일별 평균 점유율(%)", color='점유율', color_continuous_scale='Purples'), use_container_width=True)
             with col_d2: st.plotly_chart(px.line(dow_summary, x='요일', y='합계_ADR', title="요일별 평균 ADR(원)", markers=True), use_container_width=True)
 
-            # 4. 수익 최적화 매트릭스 (Yield Scatter)
             st.write("---")
-            st.subheader("💸 수익 최적화 매트릭스 (OCC vs ADR)")
+            st.subheader("💸 수익 최적화 매트릭스 (Yield Scatter)")
             fig_yield = px.scatter(otb_future, x='점유율', y='합계_ADR', size='합계_매출', color='요일', 
                                    hover_name='일자', title="점유율 대비 가격 적정성 분석 (원의 크기는 매출액)",
                                    labels={'점유율':'점유율(%)', '합계_ADR':'객단가(ADR)'},
@@ -188,10 +193,9 @@ if not prod_data.empty:
             fig_yield.add_vline(x=otb_future['점유율'].mean(), line_dash="dot", annotation_text="평균 점유율")
             st.plotly_chart(fig_yield, use_container_width=True)
 
-            # 5. AI 미래 전략 리포트
             if st.button("🤖 AI 전문가 미래 수익 전략 리포트"):
                 if api_key:
-                    with st.spinner("미래 데이터 분석 중..."):
+                    with st.spinner("미래 데이터를 분석 중..."):
                         high_occ = otb_future[otb_future['점유율'] > 80]['일자'].tolist()[:5]
                         low_occ = otb_future[otb_future['점유율'] < 30]['일자'].tolist()[:5]
                         context = f"평균점유율:{future_occ:.1f}%, 만실임박일:{high_occ}, 판촉필요:{low_occ}"
