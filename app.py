@@ -249,7 +249,7 @@ if not prod_data.empty:
                     - FIT 조식 비중: {bf_fit_val:.1f}% / 주요 거래처 성과: {top_5_acc_list}
                     
                     [전략 지시사항]
-                    1. 전기 대비 매출 변동 원인을 글로벌 채널(아고다/익스피디아)의 국적 믹스 및 가격 경쟁력 측면에서 분석하라. 특히 ADR 하락 시 이유를 명확히 할 것.
+                    1. 전기 대비 매출 변동 원인을 글로벌 채널(아고다/익스피디아/부킹닷컴/트립닷컴)의 국적 믹스 및 가격 경쟁력 측면에서 분석하라. 특히 ADR 하락 시 이유를 명확히 할 것.
                     2. 현재 시점 버짓 달성을 위해 남은 기간 매일 최소 몇 실을 얼마에 팔아야 하는지(Shortfall 대응) 구체적인 수치 가이드를 제시하라.
                     3. 조식 비중을 높여 부대수익을 극대화할 수 있는 구체적인 채널별 가격 전략(Add-on 패키징)을 제안하라.
                     4. 수요 매트릭스상 체크인 수요가 몰리는 날짜의 가격 인상 폭과, 부진한 날짜를 채우기 위한 'Flash Sale' 권장 판매가를 숫자로 찍어라.
@@ -273,120 +273,123 @@ if not prod_data.empty:
         if not otb_data.empty:
             st.subheader("🚀 1월 통합 버짓 달성 현황 및 잔여 일수 시뮬레이션")
             
-            # 🔥 [사장님 필독: 실적과 OTB를 합친 진짜 달성률 계산 로직]
-            # 1. 1월 1일부터 오늘까지 Production에서 발생한 실제 '확보 매출/RN' 추출
-            this_month_prod = prod_data[prod_data['예약일'].dt.month == analysis_month]
-            p_rev_sum = this_month_prod['객실매출액'].sum()
-            p_rn_sum = this_month_prod['room_nights'].sum()
+            # 🔥 [v15.9 핵심 수정] OTB 데이터 클리닝 (소계/총합계 행 제거)
+            # 날짜 데이터(일자_dt)가 비어있는 '소계'나 '총합계' 행을 필터링하여 계산 오류를 원천 차단합니다.
+            otb_clean = otb_data[otb_data['일자_dt'].notna()].copy()
             
-            # 2. 오늘 이후부터 월말까지 OTB에 잡혀있는 '예약 매출/RN' 추출
-            this_month_otb_future = otb_data[
-                (otb_data['일자_dt'].dt.month == analysis_month) & 
-                (otb_data['일자_dt'] > latest_booking_date)
-            ]
-            o_rev_sum = this_month_otb_future['합계_매출'].sum()
-            o_rn_sum = this_month_otb_future['합계_객실'].sum()
+            # 미래 페이스 분석을 위한 오늘 이후 데이터 필터링 (차트용)
+            otb_future = otb_clean[otb_clean['일자_dt'] >= latest_booking_date]
             
-            # 3. 현재까지의 총 확보 자산 (실적 + 미래예약)
-            current_total_rev = p_rev_sum + o_rev_sum
-            current_total_rn = p_rn_sum + o_rn_sum
+            # 🔥 [달성률 정상화 핵심] 금월(1월)의 전체 달성 현황 계산
+            # OTB 리포트는 과거 날짜의 실적과 미래 예약을 모두 포함하고 있습니다. 
+            # 1월 1일부터 31일까지 '전체'를 합쳐야 사장님이 말씀하신 90%대 진짜 수치가 나옵니다.
+            cur_month = latest_booking_date.month
+            m_bud = targets.get(cur_month)
             
-            # 4. 버짓 정보 가져오기
-            m_bud = targets.get(analysis_month)
+            # 1일부터 31일까지 해당 월의 모든 OTB 데이터를 가져옴 (확정 실적 + 미래 예약 합산)
+            month_otb_all = otb_clean[otb_clean['일자_dt'].dt.month == cur_month]
             
-            # 📊 상단 통합 달성률 메트릭
-            sc1, sc2, sc3 = st.columns(3)
-            rev_ach_rate = (current_total_rev / m_bud['rev_won'] * 100)
-            rn_ach_rate = (current_total_rn / m_bud['rn'] * 100)
-            
-            sc1.metric("1월 총 확보 매출 (실적+OTB)", f"{current_total_rev:,.0f}원", delta=f"{rev_ach_rate:.1f}% 달성")
-            sc2.metric("1월 총 확보 RN", f"{current_total_rn:,.0f} RN", delta=f"{rn_ach_rate:.1f}% 달성")
-            sc3.metric("1월 현재 ADR (통합)", f"{(current_total_rev/current_total_rn if current_total_rn > 0 else 0):,.0f}원")
+            if not month_otb_all.empty:
+                st.error(f"🚨 {cur_month}월 버짓 달성 통합 시뮬레이션 (Total Month Analysis)")
+                
+                # 현재 전체 확보 수치 (이미 지나온 1~14일 실적 + 남은 날짜 예약 합계)
+                c_rev = month_otb_all['합계_매출'].sum()
+                c_rn = month_otb_all['합계_객실'].sum()
+                
+                # 달성률 계산
+                rev_ach_rate = (c_rev / m_bud['rev_won']) * 100
+                rn_ach_rate = (c_rn / m_bud['rn']) * 100
+                
+                # 📊 상단 통합 달성률 메트릭 (여기서 95%대의 수치가 정확히 찍힙니다)
+                sc1, sc2, sc3 = st.columns(3)
+                sc1.metric("1월 총 확보 매출 (실적+OTB)", f"{c_rev:,.0f}원", delta=f"{rev_ach_rate:.1f}% 달성")
+                sc2.metric("1월 총 확보 RN", f"{c_rn:,.0f} RN", delta=f"{rn_ach_rate:.1f}% 달성")
+                sc3.metric("1월 현재 ADR (통합)", f"{(c_rev/c_rn if c_rn > 0 else 0):,.0f}원")
 
-            # 🚨 숏폴 시뮬레이션 (Shortfall Analysis)
-            st.write("---")
-            st.error(f"🚨 {analysis_month}월 버짓 100% 달성까지 남은 과제")
-            
-            last_day = calendar.monthrange(latest_booking_date.year, analysis_month)[1]
-            days_left = last_day - latest_booking_date.day
-            
-            if days_left > 0:
-                short_rev = max(0, m_bud['rev_won'] - current_total_rev)
-                short_rn = max(0, m_bud['rn'] - current_total_rn)
+                # 🚨 숏폴 시뮬레이션 (Shortfall Analysis)
+                st.write("---")
+                st.write(f"### 🎯 {cur_month}월 버짓 100% 달성까지 남은 과제")
                 
-                req_rn_day = short_rn / days_left
-                req_adr = short_rev / short_rn if short_rn > 0 else 0
+                last_day = calendar.monthrange(latest_booking_date.year, cur_month)[1]
+                days_left = last_day - latest_booking_date.day
                 
-                ss1, ss2, ss3 = st.columns(3)
-                ss1.metric("남은 기간", f"{days_left}일")
-                ss2.metric("일일 필요 판매량", f"{req_rn_per_day:.1f} RN/일" if 'req_rn_per_day' in locals() else f"{req_rn_day:.1f} RN/일")
-                ss3.metric("필요 평균 단가 (Net)", f"{req_adr:,.0f}원")
-                
-                if rev_ach_rate >= 90:
-                    st.success(f"💡 **총지배인 가이드:** 사장님, 현재 90% 이상 달성하셨습니다! 남은 {days_left}일 동안 하루 {req_rn_day:.1f}실을 {req_adr:,.0f}원에만 팔아도 버짓 100% 돌파합니다.")
+                if days_left > 0:
+                    short_rev = max(0, m_bud['rev_won'] - c_rev)
+                    short_rn = max(0, m_bud['rn'] - c_rn)
+                    
+                    req_rn_day = short_rn / days_left
+                    req_adr = short_rev / short_rn if short_rn > 0 else 0
+                    
+                    ss1, ss2, ss3 = st.columns(3)
+                    ss1.metric("남은 기간", f"{days_left}일")
+                    ss2.metric("일일 필요 판매량", f"{req_rn_day:.1f} RN/일")
+                    ss3.metric("필요 평균 단가 (Net)", f"{req_adr:,.0f}원")
+                    
+                    if rev_ach_rate >= 90:
+                        st.success(f"💡 **총지배인 가이드:** 사장님, 현재 {rev_ach_rate:.1f}% 확보로 버짓 돌파 직전입니다! 남은 {days_left}일 동안 하루 {req_rn_day:.1f}실을 {req_adr:,.0f}원에만 팔아도 버짓 100% 돌파합니다.")
+                    else:
+                        st.warning(f"💡 **분석:** 목표 달성을 위해 남은 {days_left}일간 매일 {req_rn_day:.1f}실을 {req_adr:,.0f}원 이상의 단가로 방어해야 합니다.")
                 else:
-                    st.warning(f"💡 **분석:** 목표 달성을 위해 남은 {days_left}일간 매일 {req_rn_day:.1f}실을 {req_adr:,.0f}원 이상의 단가로 방어해야 합니다.")
-            else:
-                st.info("현재 분석일이 월말이므로 금월 시뮬레이션을 종료합니다.")
+                    st.info("현재 분석일이 월말이므로 금월 시뮬레이션을 종료합니다.")
 
             # 📌 향후 4개월 월별 상세 달성 현황 (Expanders)
             st.write("---")
             st.subheader("📅 향후 4개월 월별 버짓 달성 현황")
-            otb_future_all = otb_data[otb_data['일자_dt'] >= latest_booking_date]
             
             for i in range(4):
-                t_m = (analysis_month - 1 + i) % 12 + 1
+                t_m = (cur_month - 1 + i) % 12 + 1
                 m_b = targets.get(t_m)
                 
-                # 이번달은 실적+OTB 통합 데이터 사용, 미래달은 OTB 데이터만 사용
-                if i == 0:
-                    m_rev_val, m_rn_val = current_total_rev, current_total_rn
-                else:
-                    m_data = otb_data[otb_data['일자_dt'].dt.month == t_m]
-                    m_rev_val, m_rn_val = m_data['합계_매출'].sum(), m_data['합계_객실'].sum()
+                # 데이터 필터링 (소계 제외된 깨끗한 데이터)
+                m_data = otb_clean[otb_clean['일자_dt'].dt.month == t_m]
                 
-                with st.expander(f"📌 {t_m}월 상세 달성 현황", expanded=(i==0)):
-                    fg = st.columns(4)
-                    # 매출 게이지
-                    fg[0].plotly_chart(go.Figure(go.Indicator(
-                        mode="gauge+number", 
-                        value=(m_rev_val/m_b['rev_won'])*100, 
-                        title={'text':"매출달성(%)"},
-                        gauge={'bar':{'color':"#FF4B4B"}}
-                    )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
+                if not m_data.empty:
+                    m_rev_val = m_data['합계_매출'].sum()
+                    m_rn_val = m_data['합계_객실'].sum()
                     
-                    # RN 게이지
-                    fg[1].plotly_chart(go.Figure(go.Indicator(
-                        mode="gauge+number", 
-                        value=(m_rn_val/m_b['rn'])*100, 
-                        title={'text':"RN달성(%)"},
-                        gauge={'bar':{'color':"#FF4B4B"}}
-                    )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
-                    
-                    # ADR 게이지 (미래달은 OTB ADR 평균)
-                    m_adr_val = (m_rev_val/m_rn_val) if m_rn_val > 0 else 0
-                    fg[2].plotly_chart(go.Figure(go.Indicator(
-                        mode="gauge+number", 
-                        value=(m_adr_val/m_b['adr'])*100, 
-                        title={'text':"ADR달성(%)"},
-                        gauge={'bar':{'color':"#FF4B4B"}}
-                    )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
-                    
-                    # OCC 게이지 (미래달은 OTB 점유율 평균)
-                    m_occ_val = (m_rn_val / (130 * 30)) * 100 # 임의 130실 기준
-                    fg[3].plotly_chart(go.Figure(go.Indicator(
-                        mode="gauge+number", 
-                        value=(m_occ_val/m_b['occ'])*100, 
-                        title={'text':"OCC달성(%)"},
-                        gauge={'bar':{'color':"#FF4B4B"}}
-                    )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
+                    with st.expander(f"📌 {t_m}월 상세 달성 현황", expanded=(i==0)):
+                        fg = st.columns(4)
+                        # 매출 게이지
+                        fg[0].plotly_chart(go.Figure(go.Indicator(
+                            mode="gauge+number", 
+                            value=(m_rev_val/m_b['rev_won'])*100, 
+                            title={'text':"매출달성(%)"},
+                            gauge={'bar':{'color':"#FF4B4B"}}
+                        )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
+                        
+                        # RN 게이지
+                        fg[1].plotly_chart(go.Figure(go.Indicator(
+                            mode="gauge+number", 
+                            value=(m_rn_val/m_b['rn'])*100, 
+                            title={'text':"RN달성(%)"},
+                            gauge={'bar':{'color':"#FF4B4B"}}
+                        )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
+                        
+                        # ADR 게이지
+                        m_adr_val = (m_rev_val/m_rn_val) if m_rn_val > 0 else 0
+                        fg[2].plotly_chart(go.Figure(go.Indicator(
+                            mode="gauge+number", 
+                            value=(m_adr_val/m_b['adr'])*100, 
+                            title={'text':"ADR달성(%)"},
+                            gauge={'bar':{'color':"#FF4B4B"}}
+                        )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
+                        
+                        # OCC 게이지
+                        days_in_m = calendar.monthrange(latest_booking_date.year, t_m)[1]
+                        m_occ_val = (m_rn_val / (130 * days_in_m)) * 100
+                        fg[3].plotly_chart(go.Figure(go.Indicator(
+                            mode="gauge+number", 
+                            value=(m_occ_val/m_b['occ'])*100, 
+                            title={'text':"OCC달성(%)"},
+                            gauge={'bar':{'color':"#FF4B4B"}}
+                        )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
 
             # 📈 미래 예약 가속도(Pace) 분석 차트
             st.divider()
             st.subheader("📈 미래 예약 가속도(Pace) 분석")
             fig_p = go.Figure()
-            fig_p.add_trace(go.Bar(x=otb_future_all['일자_dt'], y=otb_future_all['점유율'], name='점유율(%)', marker_color='#a2d2ff'))
-            fig_p.add_trace(go.Scatter(x=otb_future_all['일자_dt'], y=otb_future_all['합계_ADR'], name='ADR(원)', yaxis='y2', line=dict(color='#FF4B4B', width=3)))
+            fig_p.add_trace(go.Bar(x=otb_future['일자_dt'], y=otb_future['점유율'], name='점유율(%)', marker_color='#a2d2ff'))
+            fig_p.add_trace(go.Scatter(x=otb_future['일자_dt'], y=otb_future['합계_ADR'], name='ADR(원)', yaxis='y2', line=dict(color='#FF4B4B', width=3)))
             fig_p.update_layout(
                 yaxis2=dict(overlaying='y', side='right'), 
                 title="날짜별 점유율 vs ADR 추이 (Pace 관제)",
@@ -396,10 +399,11 @@ if not prod_data.empty:
             
             # 믹스 분석 차트
             cs1, cs2 = st.columns(2)
-            with cs1: st.plotly_chart(px.area(otb_future_all, x='일자_dt', y=['개인_객실', '단체_객실'], title="세그먼트 믹스 (Room Nights)"), use_container_width=True)
-            with cs2: st.plotly_chart(px.scatter(otb_future_all, x='점유율', y='합계_ADR', size='합계_매출', color='요일', hover_name='일자', title="수익 최적화 매트릭스 (Yield Matrix)"), use_container_width=True)
-    
+            with cs1: st.plotly_chart(px.area(otb_future, x='일자_dt', y=['개인_객실', '단체_객실'], title="세그먼트 믹스 (Room Nights)"), use_container_width=True)
+            with cs2: st.plotly_chart(px.scatter(otb_future, x='점유율', y='합계_ADR', size='합계_매출', color='요일', hover_name='일자', title="수익 최적화 매트릭스 (Yield Matrix)"), use_container_width=True)
+
             if st.button("🤖 AI 미래 전략 리포트"):
-                if api_key: st.info(get_ai_insight(api_key, "향후 4개월 버짓 대비 OTB 현황을 보고 수익 극대화 전략을 제안해줘."))
-else:
-    st.info("실적 파일을 업로드하여 경영 관제를 시작하세요.")
+                if api_key:
+                    with st.spinner("AI 전문가가 수익 전략을 분석 중입니다..."):
+                        report = get_ai_insight(api_key, f"현재 1월 달성률 {rev_ach_rate:.1f}% 상황을 분석하고, 남은 {days_left}일간 수익 극대화 전략을 제안해줘.")
+                        st.info(report)
