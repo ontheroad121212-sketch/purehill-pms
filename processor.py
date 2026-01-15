@@ -5,24 +5,20 @@ def process_data(uploaded_files, is_otb=False):
     if not uploaded_files:
         return pd.DataFrame()
     
-    # 다중 업로드 지원 로직 (리스트가 아니면 리스트화)
     files = uploaded_files if isinstance(uploaded_files, list) else [uploaded_files]
     combined_df = pd.DataFrame()
 
     for uploaded_file in files:
         try:
             if is_otb:
-                # OTB(영업현황) 파일은 데이터 중심 추출을 위해 3줄 스킵
                 df = pd.read_csv(uploaded_file, skiprows=3) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, skiprows=3)
             else:
-                # 실적 데이터는 헤더 위 2줄 스킵
                 df = pd.read_csv(uploaded_file, skiprows=2) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, skiprows=2)
         except:
             continue
 
         df.columns = df.columns.str.strip()
 
-        # --- [유형 1] 예약 생성 데이터 (Production) ---
         if not is_otb:
             mapping = {
                 '예약일자': '예약일', '입실일자': '도착일', '퇴실일자': '출발일',
@@ -46,13 +42,10 @@ def process_data(uploaded_files, is_otb=False):
             df['도착일'] = pd.to_datetime(df['도착일'], errors='coerce')
             df['lead_time'] = (df['도착일'] - df['예약일']).dt.days.fillna(0)
 
-            # 조식/마켓/글로벌 판별
-            df['breakfast_status'] = df.apply(lambda r: '조식포함' if any(kw in f"{r.get('service_code','')} {r.get('rate_type','')} {r.get('package','')}".upper() for kw in ['BF', '조식', 'BFR', 'BB']) else '조식불포함', axis=1)
+            df['breakfast_status'] = df.apply(lambda r: '조식포함' if any(kw in f"{r.get('service_code','')} {r.get('rate_type','')} {r.get('package','')}".upper() for kw in ['BF', '조식', 'BFR', 'BB', 'B.F']) else '조식불포함', axis=1)
             df['market_segment'] = df['market'].apply(lambda x: 'Group' if any(k in str(x).upper() for k in ['GRP', 'GROUP', 'DOS', 'BGRP', 'MICE']) else 'FIT')
             df['is_global_ota'] = df['account'].apply(lambda x: any(g in str(x).upper() for g in ['AGODA', 'EXPEDIA', 'BOOKING', 'TRIP', '아고다', '부킹닷컴', '익스피디아', '트립닷컴']))
             combined_df = pd.concat([combined_df, df])
-
-        # --- [유형 2] 영업 현황 데이터 (OTB) ---
         else:
             if len(df.columns) >= 19:
                 df = df.iloc[:, :19]
@@ -61,12 +54,10 @@ def process_data(uploaded_files, is_otb=False):
                               '내부이용', '무료', '합계_객실', '점유율', '합계_ADR', 'RevPAR', '합계_매출']
                 df['일자_dt'] = pd.to_datetime(df['일자'], errors='coerce')
                 df = df.dropna(subset=['일자_dt'])
-                for col in ['점유율', '합계_매출', '합계_ADR', '합계_객실', 'RevPAR']:
+                for col in ['점유율', '합계_매출', '합계_ADR', '합계_객실', 'RevPAR', '개인_객실', '단체_객실']:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
                 combined_df = pd.concat([combined_df, df])
 
     if not combined_df.empty and is_otb:
-        # 멀티 파일 합친 후 정렬 및 중복 제거
         combined_df = combined_df.sort_values('일자_dt').drop_duplicates('일자_dt')
-        
     return combined_df
