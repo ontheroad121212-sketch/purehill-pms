@@ -402,15 +402,12 @@ if not prod_data.empty:
             with cs1: st.plotly_chart(px.area(otb_future, x='일자_dt', y=['개인_객실', '단체_객실'], title="세그먼트 믹스 (Room Nights)"), use_container_width=True)
             with cs2: st.plotly_chart(px.scatter(otb_future, x='점유율', y='합계_ADR', size='합계_매출', color='요일', hover_name='일자', title="수익 최적화 매트릭스 (Yield Matrix)"), use_container_width=True)
 
-            if st.button("🤖 AI 미래 전략 리포트"):
+            if st.button("🤖 AI 전문가 미래 전략 리포트"):
                 if api_key:
-                    with st.spinner("AI 전문가가 수익 전략을 분석 중입니다..."):
-                        report = get_ai_insight(api_key, f"현재 1월 달성률 {rev_ach_rate:.1f}% 상황을 분석하고, 남은 {days_left}일간 수익 극대화 전략을 제안해줘.")
-                        st.info(report)
-
+                    with st.spinner("전문가가 팩트를 기반으로 전략을 구상 중입니다..."):
+                        # 🔥 강력한 페르소나 및 팩트 체크 프롬프트
                         prompt = f"""
-                        너는 글로벌 럭셔리 리조트 20년 경력의 수익 관리 이사(Director of RM)야. 총지배인(GM)인 나에게 현재 OTB(On-the-Book) 데이터를 바탕으로 현시점 가장 뾰족한 경영 판단 근거를 보고하라. 모든 보고는 '현상-원인-대책' 구조로 작성하고, 수치(%, 금액)를 반드시 포함하라.
-                        아무말이나 막 하지 말고, 업로드 된 세일즈 온더 북 데이터를 기반으로 답변 해.
+                        "너는 20년 경력의 RM 전문가다. 하지만 반드시 내가 제공한 데이터(Jan 2026) 내에서만 수치를 인용하라. 전년 데이터나 과거 리드타임 데이터가 없다면 임의로 숫자를 지어내지 말고, **'데이터 부재로 비교 불가'**라고 명시한 뒤 현재의 OTB Pace와 버짓 달성률만 가지고 전략을 짜라. 소설 쓰지 말고 팩트 위주로 보고하라."
                         
                         1. [종합 경영 판단 및 버짓 예측]
                         - 버짓 달성 예측: 현재 예약 Pace를 고려할 때 당월 매출 목표 달성 가능성을 %로 예측하라. 숏폴(Shortfall) 발생 시 정확한 부족 금액을 산출하라.
@@ -435,3 +432,5 @@ if not prod_data.empty:
                         보고 형식: 서술형은 지양하고, 임팩트 있는 불렛포인트 위주로 요약할 것.
                         """
                         st.info(get_ai_insight(api_key, prompt))
+else:
+    st.info("실적 파일을 업로드하여 경영 관제를 시작하세요.")
