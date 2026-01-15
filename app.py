@@ -189,22 +189,44 @@ if not prod_data.empty:
                 bf_s['ratio'] = (bf_s['조식포함'] / bf_s.iloc[:, 1:].sum(axis=1)) * 100
                 st.plotly_chart(px.bar(bf_s.sort_values('ratio', ascending=False), x='ratio', y='account', orientation='h', title="거래처별 조식 선택률 (%)", color_continuous_scale='YlOrRd', color='ratio'), use_container_width=True)
 
-        # 🚀 [v15.6 매트릭스 로직 정밀 수정] 사장님 요청: 예약생성일 기준 -> 체크인 분포 분석
+        # 🚀 [v15.7 매트릭스 긴급 복구] 예약생성일 기준 -> 체크인 분포 분석
         if not curr_df.empty:
             st.write("---")
             st.subheader(f"🎯 [{title_label}] 생성 예약의 체크인 날짜별 수요 매트릭스")
-            # 💡 '일자' 컬럼은 processor.py에서 '체크인/투숙일'로 처리되어 넘어옵니다.
-            # 💡 만약 컬럼명이 다를 경우를 대비한 유연한 로직 추가
-            stay_date_col = '일자' if '일자' in curr_df.columns else ('체크인' if '체크인' in curr_df.columns else None)
             
-            if stay_date_col:
-                demand_matrix = curr_df.groupby(stay_date_col).agg({'room_nights': 'sum', '객실매출액': 'sum'}).reset_index()
+            # 💡 [핵심 수정] 날짜형 컬럼 중 '예약일'이 아닌 다른 날짜 컬럼(투숙일)을 자동으로 찾습니다.
+            all_date_cols = curr_df.select_dtypes(include=['datetime64']).columns.tolist()
+            # '예약일'을 제외한 나머지 날짜 컬럼이 실제 투숙일(Stay Date)입니다.
+            stay_date_candidates = [c for c in all_date_cols if '예약' not in c]
+            
+            # 만약 후보가 없다면 '일자' 혹은 '체크인'이라는 이름이 포함된 컬럼을 강제로 찾음
+            if not stay_date_candidates:
+                stay_date_candidates = [c for c in curr_df.columns if any(x in c for x in ['일자', '체크인', 'Stay', 'Date'])]
+            
+            if stay_date_candidates:
+                target_date_col = stay_date_candidates[0] # 가장 유력한 투숙일 컬럼 선택
+                
+                # 데이터 집계
+                demand_matrix = curr_df.groupby(target_date_col).agg({'room_nights': 'sum', '객실매출액': 'sum'}).reset_index()
                 demand_matrix['Net_ADR'] = demand_matrix['객실매출액'] / demand_matrix['room_nights']
                 
-                fig_matrix = px.scatter(demand_matrix, x=stay_date_col, y='Net_ADR', size='room_nights', color='room_nights',
-                                        color_continuous_scale='Viridis', title=f"분석 기간({current_label})에 생성된 예약들의 투숙일별 분포",
-                                        labels={stay_date_col: '체크인 예정일 (Stay Date)', 'Net_ADR': 'ADR(Net)', 'room_nights': '예약량(RN)'})
+                # 차트 생성
+                fig_matrix = px.scatter(
+                    demand_matrix, 
+                    x=target_date_col, 
+                    y='Net_ADR', 
+                    size='room_nights', 
+                    color='room_nights',
+                    color_continuous_scale='Viridis', 
+                    title=f"현재 선택된 예약들({current_label})의 실제 투숙일(체크인) 분포",
+                    labels={target_date_col: '체크인 예정일 (Stay Date)', 'Net_ADR': 'ADR(Net)', 'room_nights': '예약량(RN)'}
+                )
+                
+                # 차트 레이아웃 최적화
+                fig_matrix.update_layout(hovermode='closest')
                 st.plotly_chart(fig_matrix, use_container_width=True)
+            else:
+                st.warning("⚠️ 투숙일(체크인 날짜) 데이터를 찾을 수 없어 매트릭스를 표시할 수 없습니다. 데이터의 컬럼명을 확인해주세요.")
 
         
 
