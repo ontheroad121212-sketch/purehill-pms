@@ -380,11 +380,25 @@ if not prod_data.empty:
                         title={'text':"OCC달성(%)"},
                         gauge={'bar':{'color':"#FF4B4B"}}
                     )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
-            
-            cs1, cs2 = st.columns(2)
-            with cs1: st.plotly_chart(px.area(otb_future, x='일자_dt', y=['개인_객실', '단체_객실'], title="세그먼트 믹스"), use_container_width=True)
-            with cs2: st.plotly_chart(px.scatter(otb_future, x='점유율', y='합계_ADR', size='합계_매출', color='요일', hover_name='일자', title="수익 최적화 매트릭스"), use_container_width=True)
 
+            # 📈 미래 예약 가속도(Pace) 분석 차트
+            st.divider()
+            st.subheader("📈 미래 예약 가속도(Pace) 분석")
+            fig_p = go.Figure()
+            fig_p.add_trace(go.Bar(x=otb_future_all['일자_dt'], y=otb_future_all['점유율'], name='점유율(%)', marker_color='#a2d2ff'))
+            fig_p.add_trace(go.Scatter(x=otb_future_all['일자_dt'], y=otb_future_all['합계_ADR'], name='ADR(원)', yaxis='y2', line=dict(color='#FF4B4B', width=3)))
+            fig_p.update_layout(
+                yaxis2=dict(overlaying='y', side='right'), 
+                title="날짜별 점유율 vs ADR 추이 (Pace 관제)",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig_p, use_container_width=True)
+            
+            # 믹스 분석 차트
+            cs1, cs2 = st.columns(2)
+            with cs1: st.plotly_chart(px.area(otb_future_all, x='일자_dt', y=['개인_객실', '단체_객실'], title="세그먼트 믹스 (Room Nights)"), use_container_width=True)
+            with cs2: st.plotly_chart(px.scatter(otb_future_all, x='점유율', y='합계_ADR', size='합계_매출', color='요일', hover_name='일자', title="수익 최적화 매트릭스 (Yield Matrix)"), use_container_width=True)
+    
             if st.button("🤖 AI 미래 전략 리포트"):
                 if api_key: st.info(get_ai_insight(api_key, "향후 4개월 버짓 대비 OTB 현황을 보고 수익 극대화 전략을 제안해줘."))
 else:
