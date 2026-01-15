@@ -12,127 +12,109 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.info("입력하신 키는 세션이 종료되면 자동으로 파기됩니다.")
     st.divider()
-    st.caption("v3.0: RN/ADR 및 FIT/Group 세그먼트 분석 모듈 탑재")
+    st.caption("v5.0: 사장님 요청 모든 지표 및 그래프 통합 완료")
 
 # 3. 메인 타이틀
 st.title("🏛️ 퓨어힐 호텔 경영 실적 분석 대시보드")
-st.caption("PMS 데이터를 기반으로 AI가 실시간 수익 관리(Revenue Management) 전략을 제안합니다.")
+st.caption("전체/FIT/Group 수익 지표 및 상세 시각화 분석 리포트")
 
 # 4. 파일 업로드
 uploaded_file = st.file_uploader("PMS 엑셀 파일을 업로드하세요 (CSV, XLSX)", type=['csv', 'xlsx'])
 
 if uploaded_file:
-    # processor.py를 통해 데이터 가공 (룸나잇, 세그먼트 포함)
     data = process_data(uploaded_file)
     
     if not data.empty:
-        # --- 1구역: 핵심 수익 지표 (KPI Metrics) ---
-        st.subheader("📌 핵심 경영 실적 요약")
-        c1, c2, c3, c4 = st.columns(4)
-        
-        total_rev = data['판매금액'].sum()
-        total_rn = data['room_nights'].sum()
-        # ADR 계산: 총 매출액 / 총 룸나잇(RN)
-        adr = total_rev / total_rn if total_rn > 0 else 0
-        best_acc = data.groupby('account')['판매금액'].sum().idxmax()
-        
-        c1.metric("누적 매출액", f"{total_rev:,.0f}원")
-        c2.metric("총 룸나잇 (RN)", f"{total_rn:,.0f} RN")
-        c3.metric("평균 객단가 (ADR)", f"{adr:,.0f}원")
-        c4.metric("최고 매출 거래처", best_acc)
+        # 지표 계산용 헬퍼 함수
+        def calc_metrics(df):
+            rev = df['판매금액'].sum()
+            rn = df['room_nights'].sum()
+            adr = rev / rn if rn > 0 else 0
+            return rev, rn, adr
 
+        # 데이터 분리
+        fit_data = data[data['market_segment'] == 'FIT']
+        grp_data = data[data['market_segment'] == 'Group']
+
+        # --- 지표 1단: 전체 (Total) ---
+        st.subheader("✅ [TOTAL] 전체 경영 실적")
+        t_rev, t_rn, t_adr = calc_metrics(data)
+        tc1, tc2, tc3 = st.columns(3)
+        tc1.metric("전체 매출액", f"{t_rev:,.0f}원")
+        tc2.metric("전체 룸나잇 (RN)", f"{t_rn:,.0f} RN")
+        tc3.metric("전체 객단가 (ADR)", f"{t_adr:,.0f}원")
+        st.write("---")
+
+        # --- 지표 2단: FIT (개별) ---
+        st.subheader("👤 [FIT] 개별 고객 실적")
+        f_rev, f_rn, f_adr = calc_metrics(fit_data)
+        fc1, fc2, fc3 = st.columns(3)
+        fc1.metric("FIT 매출액", f"{f_rev:,.0f}원")
+        fc2.metric("FIT 룸나잇", f"{f_rn:,.0f} RN")
+        fc3.metric("FIT 객단가 (ADR)", f"{f_adr:,.0f}원")
+        st.write("---")
+
+        # --- 지표 3단: Group (단체) ---
+        st.subheader("👥 [GROUP] 단체 고객 실적")
+        g_rev, g_rn, g_adr = calc_metrics(grp_data)
+        gc1, gc2, gc3 = st.columns(3)
+        gc1.metric("그룹 매출액", f"{g_rev:,.0f}원")
+        gc2.metric("그룹 룸나잇", f"{g_rn:,.0f} RN")
+        gc3.metric("그룹 객단가 (ADR)", f"{g_adr:,.0f}원")
         st.divider()
 
-        # --- 2구역: 시장 세그먼트 및 거래처 분석 ---
+        # --- 지표 4단: 행동 및 인구통계 ---
+        st.subheader("📊 고객 행동 및 국적 지표")
+        b1, b2, b3 = st.columns(3)
+        avg_lead = data['lead_time'].mean()
+        avg_los = data['los'].mean()
+        nation_counts = data['country'].value_counts(normalize=True).head(3) * 100
+        nation_info = " / ".join([f"{k}: {v:.1f}%" for k, v in nation_counts.to_dict().items()])
+        
+        b1.metric("📅 평균 리드타임", f"{avg_lead:.1f}일")
+        b2.metric("🌙 평균 숙박일수 (LOS)", f"{avg_los:.1f}박")
+        b3.metric("🌍 주요 국적비 (TOP 3)", nation_info)
+        st.divider()
+
+        # --- 5단: 시각화 분석 (사장님이 요청하신 그래프 4종) ---
+        st.subheader("📈 상세 데이터 시각화")
         col1, col2 = st.columns(2)
-
         with col1:
-            st.subheader("📊 FIT vs Group 매출 비중")
-            # 시장 분류(FIT/Group)에 따른 파이 차트
-            fig_seg = px.pie(data, values='판매금액', names='market_segment', hole=0.5,
-                             color_discrete_map={'FIT':'#00CC96', 'Group':'#EF553B'},
-                             title="시장 세그먼트별 기여도")
-            st.plotly_chart(fig_seg, use_container_width=True)
-
-        with col2:
-            st.subheader("🏢 거래처별 매출 TOP 10 (OTA 및 여행사)")
-            # 거래처별 매출 합계 정렬
-            acc_revenue = data.groupby('account')['판매금액'].sum().sort_values(ascending=True).tail(10).reset_index()
-            fig_acc = px.bar(acc_revenue, x='판매금액', y='account', orientation='h',
-                             color='판매금액', text_auto=',.0f', 
-                             color_continuous_scale='Blues', title="어카운트 실적 순위")
+            st.subheader("🏢 거래처별 매출 TOP 10")
+            acc_rev = data.groupby('account')['판매금액'].sum().sort_values(ascending=True).tail(10).reset_index()
+            fig_acc = px.bar(acc_rev, x='판매금액', y='account', orientation='h', color='판매금액', text_auto=',.0f')
             st.plotly_chart(fig_acc, use_container_width=True)
+        with col2:
+            st.subheader("🌐 예약 경로(Channel) 매출 비중")
+            fig_pie = px.pie(data, values='판매금액', names='channel', hole=0.5)
+            st.plotly_chart(fig_pie, use_container_width=True)
 
-        # --- 3구역: 객실 수익성 및 생산성 트렌드 ---
         col3, col4 = st.columns(2)
-
         with col3:
-            st.subheader("🛌 객실 타입별 ADR 현황")
-            # 객실타입별 ADR(매출/RN) 계산
+            st.subheader("🛌 객실 타입별 객단가(ADR) 현황")
             room_stats = data.groupby('room_type').agg({'판매금액':'sum', 'room_nights':'sum'}).reset_index()
             room_stats['ADR'] = room_stats['판매금액'] / room_stats['room_nights']
             room_stats = room_stats.sort_values('ADR', ascending=False)
-            
-            fig_adr = px.bar(room_stats, x='room_type', y='ADR', color='ADR', 
-                             text_auto=',.0f', color_continuous_scale='Viridis',
-                             title="객실 타입별 수익성 비교")
+            fig_adr = px.bar(room_stats, x='room_type', y='ADR', color='ADR', text_auto=',.0f')
             st.plotly_chart(fig_adr, use_container_width=True)
-
         with col4:
             st.subheader("📅 예약 경로별 룸나잇(RN) 생산성")
-            # 채널별 생산성 분석
             chan_rn = data.groupby('channel')['room_nights'].sum().reset_index()
-            fig_chan = px.bar(chan_rn, x='channel', y='room_nights', text_auto=True,
-                              color_discrete_sequence=['#636EFA'], title="예약 경로별 총 판매 박수")
-            st.plotly_chart(fig_chan, use_container_width=True)
+            fig_rn = px.bar(chan_rn, x='channel', y='room_nights', text_auto=True, color_discrete_sequence=['#636EFA'])
+            st.plotly_chart(fig_rn, use_container_width=True)
 
-        # --- 4구역: AI 전략 제언 ---
+        # 6. AI 전략 제언
         st.divider()
-        if st.button("🤖 AI 수익 관리 전문가 전략 리포트 받기"):
+        if st.button("🤖 AI 전문가 전략 리포트 받기"):
             if not api_key:
-                st.warning("왼쪽 사이드바에 API Key를 먼저 입력해주세요!")
+                st.warning("사이드바에 API Key를 넣어주세요!")
             else:
-                with st.spinner("전문가 AI가 수익 데이터를 정밀 분석 중입니다..."):
-                    # 풍부한 수익 데이터를 AI에게 요약 전달
-                    summary = f"""
-                    [퓨어힐 실적 데이터 요약]
-                    - 총 매출: {total_rev:,.0f}원
-                    - 총 룸나잇: {total_rn:,.0f} RN
-                    - 평균 ADR: {adr:,.0f}원
-                    - 세그먼트 비중: {data['market_segment'].value_counts(normalize=True).to_dict()}
-                    - 최다 매출 거래처: {best_acc}
-                    - 인기 객실: {data['room_type'].value_counts().idxmax()}
-                    - 평균 리드타임: {data['lead_time'].mean():.1f}일
-                    """
-                    # 구체적인 전략을 묻는 프롬프트
-                    report = get_ai_insight(api_key, summary + " 이 실적을 바탕으로 ADR 상승 전략과 FIT/Group 맞춤형 마케팅 방안을 제안해줘.")
+                with st.spinner("AI가 수익 데이터를 분석 중입니다..."):
+                    summary = f"전체ADR:{t_adr:,.0f}, FIT_ADR:{f_adr:,.0f}, Group_ADR:{g_adr:,.0f}, 리드타임:{avg_lead:.1f}일, 국적:{nation_info}"
+                    report = get_ai_insight(api_key, summary + " 시장별 수익 격차를 분석하고 수익 최적화 방안을 제안해줘.")
                     st.success("📝 AI 전문 분석 리포트")
                     st.markdown(report)
-        
-        # 5. 상세 데이터 표 (거래처별 분석 표 추가)
-        st.divider()
-        st.subheader("📋 상세 실적 데이터 시트")
-        
-        tab1, tab2 = st.tabs(["거래처별 상세 실적", "전체 원본 데이터"])
-        
-        with tab1:
-            acc_table = data.groupby('account').agg({
-                '판매금액': 'sum',
-                'room_nights': 'sum',
-                '예약일': 'count'
-            }).rename(columns={'room_nights': '총 RN', '예약일': '예약건수'}).sort_values('판매금액', ascending=False)
-            
-            # ADR 컬럼 추가 계산
-            acc_table['ADR'] = acc_table['판매금액'] / acc_table['총 RN']
-            
-            st.dataframe(acc_table.style.format({
-                '판매금액': '{:,.0f}원', 
-                '총 RN': '{:,.0f} RN',
-                'ADR': '{:,.0f}원'
-            }))
 
-        with tab2:
+        # 7. 상세 데이터 표
+        with st.expander("📝 원본 데이터 상세 보기"):
             st.dataframe(data)
-
-    else:
-        st.error("데이터를 분석할 수 없습니다. 엑셀 파일의 형식을 다시 확인해주세요.")
