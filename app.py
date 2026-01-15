@@ -7,7 +7,7 @@ from datetime import timedelta, datetime
 import pandas as pd
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 통합 관제 v12.9", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 통합 관제 v13.0", layout="wide")
 
 # 대시보드 스타일 (가독성 및 직관적 대조 강조)
 st.markdown("""
@@ -40,7 +40,6 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password", placeholder="키를 입력하세요")
     st.divider()
     
-    # 실시간 수정 가능한 targets 딕셔너리 생성
     targets = {}
     with st.expander("📅 12개월 버짓 확인 및 수정", expanded=False):
         st.info("이미지 데이터가 기본값으로 적용되어 있습니다.")
@@ -54,7 +53,7 @@ with st.sidebar:
     
     st.divider()
     target_occ_ref = st.number_input("AI 판단 점유율 기준", value=85)
-    st.caption("v12.9: 사장님 전용 무삭제 관제탑")
+    st.caption("v13.0: 세그먼트 직관 대조 및 조식/행동 분석 강화")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
@@ -86,23 +85,37 @@ if not prod_data.empty:
             if prev == 0: return "N/A"
             return f"{((curr - prev) / prev * 100):.1f}%"
 
-        # 데이터 분리
-        f_curr = curr_df[curr_df['market_segment'] == 'FIT']
-        g_curr = curr_df[curr_df['market_segment'] == 'Group']
-        
         # 전체 성과 계산
         t_tot, t_room, t_rn, t_adr = calc_metrics(curr_df)
         p_tot, p_room, p_rn, p_adr = calc_metrics(prev_df)
 
-        st.subheader(f"✅ [{title_label} 실적 직관 대조]")
+        st.subheader(f"✅ [{title_label} TOTAL 실적 직관 대조]")
         st.info(f"📊 현재 분석: {current_label} | 비교 대상: {prev_label}")
         
-        # 1구역: KPI 직관 대조 카드 (사장님 요청: 전일/전주 데이터 노출)
+        # 1구역: 전체 KPI 직관 대조 카드
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("총 매출액(Gross)", f"{t_tot:,.0f}원", delta=f"{get_delta_pct(t_tot, p_tot)} (전기: {p_tot:,.0f})")
         c2.metric("순수 객실매출", f"{t_room:,.0f}원", delta=f"{get_delta_pct(t_room, p_room)} (전기: {p_room:,.0f})")
         c3.metric("판매 룸나잇", f"{t_rn:,.0f} RN", delta=f"{int(t_rn - p_rn):+d} RN (전기: {p_rn:,.0f})")
         c4.metric("객실 ADR (Net)", f"{t_adr:,.0f}원", delta=f"{get_delta_pct(t_adr, p_adr)} (전기: {p_adr:,.0f})")
+
+        # 🚀 [추가] 조식 비중 분석 (전체 / FIT / 그룹)
+        st.write("---")
+        st.subheader("🍳 조식 포함 예약 비중 (Breakfast Ratio)")
+        
+        def get_bf_ratio(df):
+            total_bookings = len(df)
+            bf_bookings = len(df[df['breakfast_status'] == '조식포함'])
+            return (bf_bookings / total_bookings * 100) if total_bookings > 0 else 0
+
+        bf_total = get_bf_ratio(curr_df)
+        bf_fit = get_bf_ratio(curr_df[curr_df['market_segment'] == 'FIT'])
+        bf_group = get_bf_ratio(curr_df[curr_df['market_segment'] == 'Group'])
+
+        bc1, bc2, bc3 = st.columns(3)
+        bc1.metric("전체 조식 비중", f"{bf_total:.1f}%")
+        bc2.metric("FIT 조식 비중", f"{bf_fit:.1f}%")
+        bc3.metric("Group 조식 비중", f"{bf_group:.1f}%")
 
         # Monthly 탭에서만 버짓 게이지 표시
         if title_label == "MONTHLY":
@@ -118,20 +131,40 @@ if not prod_data.empty:
                 st.plotly_chart(go.Figure(go.Indicator(mode="gauge+number", value=(act_occ/m_target['occ'])*100, title={'text':"OCC달성(%)"})).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
 
         st.write("---")
-        # 2구역: FIT vs Group 세그먼트별 매출/RN/객단가 (무삭제)
-        st.subheader("👤 세그먼트별 상세 성과 (순수 객실 기준)")
-        fc_tot, fc_room, fc_rn, fc_adr = calc_metrics(f_curr)
-        gc_tot, gc_room, gc_rn, gc_adr = calc_metrics(g_curr)
+        # 🚀 [변경] 2구역: FIT vs Group 세그먼트별 직관 대조 (전체와 동일한 방식)
+        f_curr = curr_df[curr_df['market_segment'] == 'FIT']
+        f_prev = prev_df[prev_df['market_segment'] == 'FIT']
+        g_curr = curr_df[curr_df['market_segment'] == 'Group']
+        g_prev = prev_df[prev_df['market_segment'] == 'Group']
         
-        col_f, col_g = st.columns(2)
-        with col_f:
-            st.write("**[FIT 세그먼트]**")
-            st.metric("FIT 매출", f"{fc_room:,.0f}원", f"{fc_rn:,.0f} RN")
-            st.metric("FIT 객단가(ADR)", f"{fc_adr:,.0f}원")
-        with col_g:
-            st.write("**[Group 세그먼트]**")
-            st.metric("그룹 매출", f"{gc_room:,.0f}원", f"{gc_rn:,.0f} RN")
-            st.metric("그룹 객단가(ADR)", f"{gc_adr:,.0f}원")
+        ft_tot, ft_room, ft_rn, ft_adr = calc_metrics(f_curr)
+        fp_tot, fp_room, fp_rn, fp_adr = calc_metrics(f_prev)
+        gt_tot, gt_room, gt_rn, gt_adr = calc_metrics(g_curr)
+        gp_tot, gp_room, gp_rn, gp_adr = calc_metrics(g_prev)
+
+        st.subheader("👤 FIT 세그먼트 성과 대조")
+        fc1, fc2, fc3, fc4 = st.columns(4)
+        fc1.metric("FIT 총매출", f"{ft_tot:,.0f}원", delta=f"{get_delta_pct(ft_tot, fp_tot)} (전기: {fp_tot:,.0f})")
+        fc2.metric("FIT 객실매출", f"{ft_room:,.0f}원", delta=f"{get_delta_pct(ft_room, fp_room)} (전기: {fp_room:,.0f})")
+        fc3.metric("FIT RN", f"{ft_rn:,.0f} RN", delta=f"{int(ft_rn - fp_rn):+d} RN")
+        fc4.metric("FIT ADR (Net)", f"{ft_adr:,.0f}원", delta=f"{get_delta_pct(ft_adr, fp_adr)}")
+
+        # 🚀 [추가] FIT 행동 지표 (리드타임 / LOS / 국적비) - 전체 FIT 대상
+        if not f_curr.empty:
+            st.write("**[FIT 행동 패턴 분석]**")
+            fa1, fa2, fa3 = st.columns(3)
+            fa1.metric("FIT 평균 리드타임", f"{f_curr['lead_time'].mean():.1f}일")
+            fa2.metric("FIT 평균 LOS", f"{f_curr['los'].mean():.1f}박")
+            fa3.metric("FIT 주요 국적", f_curr['country'].value_counts().index[0] if not f_curr['country'].empty else "N/A")
+            st.plotly_chart(px.pie(f_curr, names='country', title="FIT 국적 비중", hole=0.4), use_container_width=True)
+
+        st.write("---")
+        st.subheader("👥 Group 세그먼트 성과 대조")
+        gc1, gc2, gc3, gc4 = st.columns(4)
+        gc1.metric("그룹 총매출", f"{gt_tot:,.0f}원", delta=f"{get_delta_pct(gt_tot, gp_tot)} (전기: {gp_tot:,.0f})")
+        gc2.metric("그룹 객실매출", f"{gt_room:,.0f}원", delta=f"{get_delta_pct(gt_room, gp_room)} (전기: {gp_room:,.0f})")
+        gc3.metric("그룹 RN", f"{gt_rn:,.0f} RN", delta=f"{int(gt_rn - gp_rn):+d} RN")
+        gc4.metric("그룹 ADR (Net)", f"{gt_adr:,.0f}원", delta=f"{get_delta_pct(gt_adr, gp_adr)}")
 
         st.write("---")
         # 3구역: 거래처별 심층 분석 (LOS, 리드타임 포함 4종 그래프 - 무삭제)
@@ -155,7 +188,7 @@ if not prod_data.empty:
         if not gl_df.empty:
             st.plotly_chart(px.bar(gl_df, x="account", color="country", title="글로벌 OTA 채널별 국적 비중", barmode="stack", text_auto=True), use_container_width=True)
 
-        # 5구역: 조식 분석 (v11.9 로직 무삭제 보존)
+        # 5구역: 조식 채널별 분석 (v11.9 로직 무삭제 보존)
         st.write("---")
         st.subheader("🍳 지정 거래처 조식 선택률 분석")
         targets_acc = ['아고다', '부킹닷컴', '익스피디아 e.c', '익스피디아 h.c', '트립닷컴', '네이버', '홈페이지', '야놀자', '호텔타임', '트립비토즈', '마이리얼트립', '올마이투어', '타이드스퀘어', 'personal']
@@ -171,7 +204,7 @@ if not prod_data.empty:
                 with st.spinner("AI가 데이터를 정밀 분석 중..."):
                     st.info(get_ai_insight(api_key, f"매출:{t_tot:,.0f}, RN:{t_rn}, ADR:{t_adr:,.0f} 실적을 과거 대비 분석하여 뾰족한 전략을 제안해줘."))
 
-    # 4. 탭 구성 및 날짜 필터링 (v12.9 직관적 대조 연동)
+    # 4. 탭 구성 및 날짜 필터링
     tab_d, tab_w, tab_m, tab_f = st.tabs(["📅 Daily", "📊 Weekly", "📈 Monthly", "🚀 Future OTB (전략관제)"])
 
     with tab_d:
@@ -209,7 +242,7 @@ if not prod_data.empty:
                         fg4.plotly_chart(go.Figure(go.Indicator(mode="gauge+number", value=(m_data['점유율'].mean()/m_b['occ'])*100, title={'text':"OCC달성(%)"}, gauge={'bar':{'color':"#FF4B4B"}})).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
             
             st.divider()
-            st.subheader("📈 미래 예약 페이스(Pace) 분석")
+            st.subheader("📈 미래 예약 가속도(Pace) 분석")
             fig_p = go.Figure()
             fig_p.add_trace(go.Bar(x=otb_future['일자_dt'], y=otb_future['점유율'], name='점유율(%)', marker_color='#a2d2ff'))
             fig_p.add_trace(go.Scatter(x=otb_future['일자_dt'], y=otb_future['합계_ADR'], name='ADR(원)', yaxis='y2', line=dict(color='#FF4B4B', width=3)))
