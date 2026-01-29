@@ -8,7 +8,7 @@ import pandas as pd
 import calendar
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 통합 관제 v15.5", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 통합 관제 v16.2", layout="wide")
 
 # 대시보드 스타일 (가독성 및 직관적 대조 강조)
 st.markdown("""
@@ -54,7 +54,7 @@ with st.sidebar:
     
     st.divider()
     target_occ_ref = st.number_input("AI 판단 점유율 기준 (%)", value=85)
-    st.caption("v15.5: 진짜 최종 무삭제 완결본")
+    st.caption("v16.2: 무삭제 통합 팩트 관제판")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
@@ -73,6 +73,10 @@ with cau3: raw_file = st.file_uploader("상세 예약 리스트 (Raw Data)", typ
 
 prod_data = process_data(prod_file, is_otb=False) if prod_file else pd.DataFrame()
 otb_data = process_data(otb_files, is_otb=True) if otb_files else pd.DataFrame()
+
+# OTB 데이터 전처리 (소계 행 제거)
+if not otb_data.empty and '일자_dt' in otb_data.columns:
+    otb_data = otb_data[otb_data['일자_dt'].notna()].copy()
 
 if not prod_data.empty:
     latest_booking_date = prod_data['예약일'].max()
@@ -417,7 +421,7 @@ if not prod_data.empty:
                         stly_info = "제공됨" if stly_file else "부재(비교불가)"
                         snap_info = "제공됨" if snap_file else "부재(Pace분석불가)"
                         raw_info = "제공됨" if raw_file else "부재(리드타임분석불가)"
-                        
+
                         # 🔥 강력한 페르소나 및 팩트 체크 프롬프트
                         prompt = f"""
                         "너는 20년 경력의 RM 전문가다. 하지만 반드시 내가 제공한 데이터(업로드한 파일) 내에서만 수치를 인용하라. 전년 데이터나 과거 리드타임 데이터가 없다면 임의로 숫자를 지어내지 말고, **'데이터 부재로 비교 불가'**라고 명시한 뒤 현재의 OTB Pace와 버짓 달성률만 가지고 전략을 짜라. 소설 쓰지 말고 팩트 위주로 보고하라."
@@ -427,14 +431,12 @@ if not prod_data.empty:
                         - 남은 일수: {days_left}일
                         - 목표 달성 위해 매일 필요한 판매량: {req_rn_day:.1f}실
                         - 목표 달성 위해 필요한 단가: {req_adr:,.0f}원
-
+                        
                         [업로드 데이터 현황]
                         - 전년 동기 OTB(STLY): {stly_info}
                         - 1주일 전 스냅샷: {snap_info}
                         - 상세 예약 리스트(Raw): {raw_info}
-                        - 당월 매출 달성률: {rev_ach_rate:.1f}%
-                        - 남은 일수: {days_left}일 / 필요 일일판매량: {req_rn_day:.1f}실 / 필요 단가: {req_adr:,.0f}원
-                        
+
                         1. [종합 경영 판단 및 버짓 예측]
                         - 버짓 달성 예측: 현재 예약 Pace를 고려할 때 당월 매출 목표 달성 가능성을 %로 예측하라. 숏폴(Shortfall) 발생 시 정확한 부족 금액을 산출하라.
                         - 세그먼트 믹스: FIT(개인)와 Group(단체) 비중을 분석하여 ADR을 훼손하는 세그먼트를 찾아내고, 수익성 개선을 위한 믹스 조정안을 제안하라.
