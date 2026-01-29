@@ -6,9 +6,13 @@ from ai_engine import get_ai_insight
 from datetime import timedelta, datetime
 import pandas as pd
 import calendar
+import firebase_admin
+from firebase_admin import credentials, storage
+import json
+import io
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 통합 관제 v16.2", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 통합 관제 v17.0", layout="wide")
 
 # 대시보드 스타일 (가독성 및 직관적 대조 강조)
 st.markdown("""
@@ -35,9 +39,27 @@ BUDGET_DATA = {
     12: {"rev": 804030110,  "rn": 2765, "adr": 290788, "occ": 68.6}
 }
 
-# 2. 사이드바 (경영 타겟 관리)
+# 🚀 [파이어베이스 초기화 로직]
+# .streamlit/secrets.toml 파일에 [firebase] 섹션이 있어야 합니다.
+if not firebase_admin._apps:
+    try:
+        # secrets에서 키 정보를 가져와 딕셔너리로 변환
+        key_dict = json.loads(st.secrets["firebase"]["service_account"])
+        cred = credentials.Certificate(key_dict)
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': st.secrets["firebase"]["storage_bucket"]
+        })
+    except Exception as e:
+        st.error(f"🔥 파이어베이스 연결 실패: {e}")
+
+# 2. 사이드바 (경영 타겟 관리 및 날짜 조회)
 with st.sidebar:
-    st.header("🎯 경영 타겟 설정")
+    st.header("🎯 경영 타겟 및 조회")
+    
+    # 📅 [기능 추가] 데이터 기준일 조회 (파이어베이스 연동 핵심)
+    ref_date = st.date_input("📅 데이터 기준일 (Snapshot Date)", datetime.now())
+    st.divider()
+
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.divider()
     
@@ -54,27 +76,90 @@ with st.sidebar:
     
     st.divider()
     target_occ_ref = st.number_input("AI 판단 점유율 기준 (%)", value=85)
-    st.caption("v16.2: 무삭제 통합 팩트 관제판")
+    st.caption("v17.0: 파이어베이스 자동 저장/조회 탑재")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
-# 3. 데이터 로드 및 처리
-col_up1, col_up2 = st.columns(2)
-with col_up1: prod_file = st.file_uploader("1. 실적 (Production)", type=['csv', 'xlsx'])
-with col_up2: otb_files = st.file_uploader("2. 온더북 (OTB)", type=['csv', 'xlsx'], accept_multiple_files=True)
+# 3. 데이터 로드 및 처리 (파이어베이스 연동 로직 적용)
+# 사장님 지시: 조회 날짜에 파일이 있으면 가져오고, 없으면 업로드 받아서 저장한다.
 
-# 🚀 이 부분만 otb_files 코드 아래에 복사해서 넣으세요
-st.divider()
-st.subheader("➕ 정밀 분석용 추가 데이터 업로드 (Pace/Pick-up/리드타임)")
-cau1, cau2, cau3 = st.columns(3)
-with cau1: stly_file = st.file_uploader("전년 동기 OTB (STLY)", type=['csv', 'xlsx'])
-with cau2: snap_file = st.file_uploader("1주일 전 OTB 스냅샷", type=['csv', 'xlsx'])
-with cau3: raw_file = st.file_uploader("상세 예약 리스트 (Raw Data)", type=['csv', 'xlsx'])
+prod_data = pd.DataFrame()
+otb_data = pd.DataFrame()
+stly_data = pd.DataFrame()
 
-prod_data = process_data(prod_file, is_otb=False) if prod_file else pd.DataFrame()
-otb_data = process_data(otb_files, is_otb=True) if otb_files else pd.DataFrame()
+# 파이어베이스 버킷 연결
+bucket = storage.bucket()
+date_str = ref_date.strftime("%Y-%m-%d")
 
-# OTB 데이터 전처리 (소계 행 제거)
+# 파일 경로 정의
+blob_prod = bucket.blob(f"production/prod_{date_str}.csv")
+blob_otb = bucket.blob(f"otb/otb_{date_str}.csv")
+blob_stly = bucket.blob(f"stly/stly_{date_str}.csv") # 전년 동기 데이터도 저장
+
+# 1) 파이어베이스 조회 시도
+if blob_prod.exists() and blob_otb.exists():
+    st.success(f"☁️ 클라우드에서 {date_str} 기준 데이터를 성공적으로 불러왔습니다!")
+    # 다운로드 및 로드
+    prod_content = blob_prod.download_as_string()
+    otb_content = blob_otb.download_as_string()
+    prod_data = pd.read_csv(io.BytesIO(prod_content))
+    otb_data = pd.read_csv(io.BytesIO(otb_content))
+    
+    # 날짜 컬럼 복원 (CSV 저장 시 문자열로 변하므로)
+    if '예약일' in prod_data.columns: prod_data['예약일'] = pd.to_datetime(prod_data['예약일'])
+    if '일자' in prod_data.columns: prod_data['일자'] = pd.to_datetime(prod_data['일자'])
+    if '일자_dt' in otb_data.columns: otb_data['일자_dt'] = pd.to_datetime(otb_data['일자_dt'])
+    
+    # STLY 데이터 확인
+    if blob_stly.exists():
+        stly_content = blob_stly.download_as_string()
+        stly_data = pd.read_csv(io.BytesIO(stly_content))
+        if '일자_dt' in stly_data.columns: stly_data['일자_dt'] = pd.to_datetime(stly_data['일자_dt'])
+
+else:
+    # 2) 데이터가 없으면 업로드 UI 표시
+    st.warning(f"⚠️ {date_str} 기준 데이터가 서버에 없습니다. 파일을 업로드하면 자동으로 저장됩니다.")
+    
+    col_up1, col_up2 = st.columns(2)
+    with col_up1: prod_file = st.file_uploader("1. 실적 (Production)", type=['csv', 'xlsx'])
+    with col_up2: otb_files = st.file_uploader("2. 온더북 (OTB)", type=['csv', 'xlsx'], accept_multiple_files=True)
+    
+    with st.expander("➕ 정밀 분석용 추가 데이터 업로드 (Pace/Pick-up/리드타임)", expanded=False):
+        c_add1, c_add2, c_add3 = st.columns(3)
+        with c_add1: stly_file_up = st.file_uploader("전년 동기 OTB (STLY)", type=['csv', 'xlsx'])
+        with c_add2: snap_file = st.file_uploader("1주일 전 OTB 스냅샷", type=['csv', 'xlsx']) # 스냅샷은 일회성이므로 저장 로직 제외 가능
+        with c_add3: raw_file = st.file_uploader("상세 예약 리스트 (Raw Data)", type=['csv', 'xlsx'])
+
+    # 업로드된 파일 처리 및 파이어베이스 저장
+    if prod_file and otb_files:
+        with st.spinner("데이터 처리 및 클라우드 저장 중..."):
+            # 데이터 처리 (processor.py 사용)
+            prod_data = process_data(prod_file, is_otb=False)
+            otb_data = process_data(otb_files, is_otb=True)
+            
+            if stly_file_up:
+                stly_data = process_data(stly_file_up, is_otb=True)
+            
+            # 기준일 자동 추출 (파일 내부 예약일의 최대값)
+            # 사장님 지시: "파일 안에 있는 예약일로 해야 맞을거 같은데" -> 자동 추출 로직 적용
+            if not prod_data.empty:
+                extracted_date = prod_data['예약일'].max().strftime("%Y-%m-%d")
+                
+                # 만약 선택한 날짜와 파일 날짜가 다르면 경고 (하지만 저장은 파일 날짜로)
+                if extracted_date != date_str:
+                    st.toast(f"💡 파일 내부 기준일({extracted_date})이 선택일과 달라 해당 날짜로 저장합니다.")
+                
+                # 파이어베이스에 CSV로 저장 (utf-8-sig로 한글 깨짐 방지)
+                bucket.blob(f"production/prod_{extracted_date}.csv").upload_from_string(prod_data.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
+                bucket.blob(f"otb/otb_{extracted_date}.csv").upload_from_string(otb_data.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
+                
+                if not stly_data.empty:
+                    bucket.blob(f"stly/stly_{extracted_date}.csv").upload_from_string(stly_data.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
+                
+                st.success(f"✅ 데이터가 {extracted_date} 기준으로 안전하게 저장되었습니다! (새로고침 시 자동 로드)")
+
+
+# OTB 데이터 전처리 (소계 행 제거) - 로드된 데이터에 대해 수행
 if not otb_data.empty and '일자_dt' in otb_data.columns:
     otb_data = otb_data[otb_data['일자_dt'].notna()].copy()
 
@@ -153,12 +238,12 @@ if not prod_data.empty:
         fc4.metric("FIT ADR (Net)", f"{ft_adr:,.0f}원", delta=f"{get_delta_pct(ft_adr, fp_adr)}")
 
         if not f_curr.empty:
-            st.write("**[FIT 전체 행동 패턴 분석]**")
+            st.write("**[FIT 전체 행동 지표]**")
             fa1, fa2, fa3 = st.columns(3)
-            fa1.metric("FIT 평균 리드타임", f"{f_curr['lead_time'].mean():.1f}일")
-            fa2.metric("FIT 평균 LOS", f"{f_curr['los'].mean():.1f}박")
-            fa3.metric("FIT 최다 투숙 국적", f_curr['country'].value_counts().index[0])
-            st.plotly_chart(px.pie(f_curr, names='country', title="FIT 전체 국적 비중", hole=0.4), use_container_width=True)
+            fa1.metric("FIT 리드타임", f"{f_curr['lead_time'].mean():.1f}일")
+            fa2.metric("FIT LOS", f"{f_curr['los'].mean():.1f}박")
+            fa3.metric("FIT 주요 국적", f_curr['country'].value_counts().index[0] if not f_curr['country'].empty else "N/A")
+            st.plotly_chart(px.pie(f_curr, names='country', title="FIT 전체 국적 비중"), use_container_width=True)
 
         st.write("---")
         st.subheader("👥 Group 세그먼트 성과 대조")
@@ -168,29 +253,29 @@ if not prod_data.empty:
         gc3.metric("그룹 RN", f"{gt_rn:,.0f} RN", delta=f"{int(gt_rn - gp_rn):+d} RN")
         gc4.metric("그룹 ADR (Net)", f"{gt_adr:,.0f}원", delta=f"{get_delta_pct(gt_adr, gp_adr)}")
 
+        # 거래처 분석
         st.write("---")
-        # FIT 거래처 심층 분석
-        st.subheader("📊 FIT 거래처별 심층 분석 (마이스/그룹 제외)")
+        st.subheader("📊 FIT 거래처 심층 분석 (Top 10)")
         pure_f = f_curr[~f_curr['account'].str.contains('마이스|그룹|GRP|MICE', na=False, case=False)]
         acc_stats = pd.DataFrame()
         if not pure_f.empty:
             acc_stats = pure_f.groupby('account').agg({'room_nights':'sum','객실매출액':'sum','los':'mean','lead_time':'mean'}).reset_index()
             acc_stats['Net_ADR'] = acc_stats['객실매출액'] / acc_stats['room_nights']
             g_col1, g_col2 = st.columns(2)
-            with g_col1: st.plotly_chart(px.bar(acc_stats.sort_values('room_nights').tail(10), x='room_nights', y='account', orientation='h', title="거래처별 룸나잇", text_auto=True, color_continuous_scale='Blues', color='room_nights'), use_container_width=True)
-            with g_col2: st.plotly_chart(px.bar(acc_stats.sort_values('Net_ADR').tail(10), x='Net_ADR', y='account', orientation='h', title="거래처별 객실 ADR", text_auto=',.0f', color_continuous_scale='Greens', color='Net_ADR'), use_container_width=True)
+            with g_col1: st.plotly_chart(px.bar(acc_stats.sort_values('room_nights').tail(10), x='room_nights', y='account', orientation='h', title="거래처별 룸나잇 생산성", text_auto=True), use_container_width=True)
+            with g_col2: st.plotly_chart(px.bar(acc_stats.sort_values('Net_ADR').tail(10), x='Net_ADR', y='account', orientation='h', title="거래처별 순수 객실 ADR"), use_container_width=True)
             g_col3, g_col4 = st.columns(2)
-            with g_col3: st.plotly_chart(px.bar(acc_stats.sort_values('los').tail(10), x='los', y='account', orientation='h', title="거래처별 평균 LOS", text_auto='.1f', color_continuous_scale='Purples', color='los'), use_container_width=True)
-            with g_col4: st.plotly_chart(px.bar(acc_stats.sort_values('lead_time').tail(10), x='lead_time', y='account', orientation='h', title="거래처별 평균 리드타임", text_auto='.1f', color_continuous_scale='Oranges', color='lead_time'), use_container_width=True)
+            with g_col3: st.plotly_chart(px.bar(acc_stats.sort_values('los').tail(10), x='los', y='account', orientation='h', title="거래처별 평균 LOS", text_auto=True), use_container_width=True)
+            with g_col4: st.plotly_chart(px.bar(acc_stats.sort_values('lead_time').tail(10), x='lead_time', y='account', orientation='h', title="거래처별 평균 리드타임", text_auto=True), use_container_width=True)
 
         # 글로벌 OTA 분석
         st.write("---")
         gl_ch = ['아고다', 'AGODA', '익스피디아', '부킹', '트립']
         gl_df = f_curr[f_curr['account'].str.upper().str.contains('|'.join(gl_ch), na=False)]
         if not gl_df.empty:
-            st.plotly_chart(px.bar(gl_df, x="account", color="country", title="글로벌 OTA 채널별 국적 비중", barmode="stack", text_auto=True), use_container_width=True)
+            st.plotly_chart(px.bar(gl_df, x="account", color="country", title="글로벌 OTA 채널별 국적 비중", barmode="stack"), use_container_width=True)
         
-        # 조식 선택률 분석
+        # 지정 거래처 조식 선택률 (원본 무삭제 로직)
         targets_acc = ['아고다', '부킹닷컴', '익스피디아 e.c', '익스피디아 h.c', '트립닷컴', '네이버', '홈페이지', '야놀자', '호텔타임', '트립비토즈', '마이리얼트립', '올마이투어', '타이드스퀘어', 'personal']
         f_acc_df = curr_df[curr_df['account'].str.lower().str.replace(" ", "").isin([a.lower().replace(" ","") for a in targets_acc])]
         if not f_acc_df.empty:
@@ -201,48 +286,20 @@ if not prod_data.empty:
                 bf_s['ratio'] = (bf_s['조식포함'] / bf_s.iloc[:, 1:].sum(axis=1)) * 100
                 st.plotly_chart(px.bar(bf_s.sort_values('ratio', ascending=False), x='ratio', y='account', orientation='h', title="거래처별 조식 선택률 (%)", color_continuous_scale='YlOrRd', color='ratio'), use_container_width=True)
 
-        # 🚀 [v15.7 매트릭스 긴급 복구] 예약생성일 기준 -> 체크인 분포 분석
+        # 🚀 [v15.5 사장님 요청] 수요 집중도 매트릭스 (Stay-Date 기반)
         if not curr_df.empty:
             st.write("---")
-            st.subheader(f"🎯 [{title_label}] 생성 예약의 체크인 날짜별 수요 매트릭스")
+            st.subheader(f"🎯 [{title_label}] 생성 예약분 기반 체크인 수요 매트릭스")
+            date_col = '일자' if '일자' in curr_df.columns else ('예약일' if '예약일' in curr_df.columns else curr_df.select_dtypes(include=['datetime64']).columns[0])
+            demand_matrix = curr_df.groupby(date_col).agg({'room_nights': 'sum', '객실매출액': 'sum'}).reset_index()
+            demand_matrix['Net_ADR'] = demand_matrix['객실매출액'] / demand_matrix['room_nights']
             
-            # 💡 [핵심 수정] 날짜형 컬럼 중 '예약일'이 아닌 다른 날짜 컬럼(투숙일)을 자동으로 찾습니다.
-            all_date_cols = curr_df.select_dtypes(include=['datetime64']).columns.tolist()
-            # '예약일'을 제외한 나머지 날짜 컬럼이 실제 투숙일(Stay Date)입니다.
-            stay_date_candidates = [c for c in all_date_cols if '예약' not in c]
-            
-            # 만약 후보가 없다면 '일자' 혹은 '체크인'이라는 이름이 포함된 컬럼을 강제로 찾음
-            if not stay_date_candidates:
-                stay_date_candidates = [c for c in curr_df.columns if any(x in c for x in ['일자', '체크인', 'Stay', 'Date'])]
-            
-            if stay_date_candidates:
-                target_date_col = stay_date_candidates[0] # 가장 유력한 투숙일 컬럼 선택
-                
-                # 데이터 집계
-                demand_matrix = curr_df.groupby(target_date_col).agg({'room_nights': 'sum', '객실매출액': 'sum'}).reset_index()
-                demand_matrix['Net_ADR'] = demand_matrix['객실매출액'] / demand_matrix['room_nights']
-                
-                # 차트 생성
-                fig_matrix = px.scatter(
-                    demand_matrix, 
-                    x=target_date_col, 
-                    y='Net_ADR', 
-                    size='room_nights', 
-                    color='room_nights',
-                    color_continuous_scale='Viridis', 
-                    title=f"현재 선택된 예약들({current_label})의 실제 투숙일(체크인) 분포",
-                    labels={target_date_col: '체크인 예정일 (Stay Date)', 'Net_ADR': 'ADR(Net)', 'room_nights': '예약량(RN)'}
-                )
-                
-                # 차트 레이아웃 최적화
-                fig_matrix.update_layout(hovermode='closest')
-                st.plotly_chart(fig_matrix, use_container_width=True)
-            else:
-                st.warning("⚠️ 투숙일(체크인 날짜) 데이터를 찾을 수 없어 매트릭스를 표시할 수 없습니다. 데이터의 컬럼명을 확인해주세요.")
+            fig_matrix = px.scatter(demand_matrix, x=date_col, y='Net_ADR', size='room_nights', color='room_nights',
+                                    color_continuous_scale='Viridis', title=f"{current_label} 예약의 체크인 날짜별 분포",
+                                    labels={date_col: '체크인 예정일 (Stay Date)', 'Net_ADR': 'ADR(Net)', 'room_nights': '예약량(RN)'})
+            st.plotly_chart(fig_matrix, use_container_width=True)
 
-        
-
-        # 🚀 [v15.6 뾰족한 AI 리포트 로직] 사장님 요청 페르소나 반영
+        # 🚀 [v15.5 사장님 요청] 뾰족하게 다듬은 럭셔리 RM 전문가 AI 리포트
         if st.button(f"🤖 AI 전문가 [{title_label}] 전략 리포트", key=f"ai_{title_label}"):
             if api_key:
                 with st.spinner("전문가가 성과를 정밀 진단 중..."):
@@ -254,19 +311,19 @@ if not prod_data.empty:
                     prompt = f"""
                     너는 글로벌 럭셔리 호텔 20년 경력의 Revenue Management 전문가다. 사장님(CEO)께 보고하듯 '현상-원인-액션아이템' 구조로 매우 뾰족하게 제언하라.
                     
-                    [현재 데이터 요약]
+                    [현재 실적 요약]
                     - 분석 월: {analysis_month}월 / 분석 주기: {title_label} ({current_label})
                     - 실적: 객실매출 {t_room:,.0f}원, RN {t_rn}, ADR {t_adr:,.0f}원
                     - 전기 대비 추이: 객실매출 {get_delta_pct(t_room, p_room)}, ADR {get_delta_pct(t_adr, p_adr)}
                     - FIT 조식 비중: {bf_fit_val:.1f}% / 주요 거래처 성과: {top_5_acc_list}
                     
-                    [전략 지시사항]
-                    1. 전기 대비 매출 변동 원인을 글로벌 채널(아고다/익스피디아/부킹닷컴/트립닷컴)의 국적 믹스 및 가격 경쟁력 측면에서 분석하라. 특히 ADR 하락 시 이유를 명확히 할 것.
-                    2. 현재 시점 버짓 달성을 위해 남은 기간 매일 최소 몇 실을 얼마에 팔아야 하는지(Shortfall 대응) 구체적인 수치 가이드를 제시하라.
-                    3. 조식 비중을 높여 부대수익을 극대화할 수 있는 구체적인 채널별 가격 전략(Add-on 패키징)을 제안하라.
-                    4. 수요 매트릭스상 체크인 수요가 몰리는 날짜의 가격 인상 폭과, 부진한 날짜를 채우기 위한 'Flash Sale' 권장 판매가를 숫자로 찍어라.
+                    [분석 지시사항]
+                    1. 전기 대비 매출 변동 원인을 글로벌 채널(아고다/익스피디아)의 국적 믹스 및 가격 경쟁력 측면에서 분석하라.
+                    2. 현재 시점 버짓 달성을 위해 남은 기간 매일 최소 몇 실을 얼마에 팔아야 하는지(Shortfall 대응) 구체적 숫자를 제시하라.
+                    3. 조식 비중을 높여 부대수익을 극대화할 수 있는 구체적인 채널별 가격 전략을 제안하라.
+                    4. 수요 매트릭스상 수요가 몰리는 날짜의 가격 인상 폭과, 부진 날짜의 'Flash Sale' 권장 판매가를 숫자로 정확히 찍어라.
                     
-                    형식: 서술형 제외, 임팩트 있는 불렛포인트로 보고할 것.
+                    보고 형식: 서술형 제외, 임팩트 있는 불렛포인트로 요약할 것.
                     """
                     st.info(get_ai_insight(api_key, prompt))
 
@@ -280,162 +337,90 @@ if not prod_data.empty:
         m_start = latest_booking_date.replace(day=1)
         render_booking_dashboard(prod_data[prod_data['예약일'] >= m_start], prod_data[(prod_data['예약일'] >= (m_start - timedelta(days=1)).replace(day=1)) & (prod_data['예약일'] < m_start)], "MONTHLY", "이번달", "지난달")
 
-# 5. 미래 OTB 및 시뮬레이션 (tab_f)
+    # 5. 미래 OTB 및 시뮬레이션
     with tab_f:
         if not otb_data.empty:
-            st.subheader("🚀 당월 통합 버짓 달성 현황 및 잔여 일수 시뮬레이션")
+            st.subheader("🚀 향후 4개월 월별 버짓 달성 현황 및 긴급 시뮬레이션")
             
-            # 🔥 [v15.9 핵심 수정] OTB 데이터 클리닝 (소계/총합계 행 제거)
-            # 날짜 데이터(일자_dt)가 비어있는 '소계'나 '총합계' 행을 필터링하여 계산 오류를 원천 차단합니다.
-            otb_clean = otb_data[otb_data['일자_dt'].notna()].copy()
+            # 🔥 [달성률 계산 로직]
+            this_month_prod = prod_data[prod_data['예약일'].dt.month == analysis_month]
+            p_rev_sum = this_month_prod['객실매출액'].sum()
+            p_rn_sum = this_month_prod['room_nights'].sum()
             
-            # 미래 페이스 분석을 위한 오늘 이후 데이터 필터링 (차트용)
-            otb_future = otb_clean[otb_clean['일자_dt'] >= latest_booking_date]
+            this_month_otb_all = otb_data[otb_data['일자_dt'].dt.month == analysis_month]
+            c_rev = this_month_otb_all['합계_매출'].sum()
+            c_rn = this_month_otb_all['합계_객실'].sum()
             
-            # 🔥 [달성률 정상화 핵심] 금월(1월)의 전체 달성 현황 계산
-            # OTB 리포트는 과거 날짜의 실적과 미래 예약을 모두 포함하고 있습니다. 
-            # 1월 1일부터 31일까지 '전체'를 합쳐야 사장님이 말씀하신 90%대 진짜 수치가 나옵니다.
-            cur_month = latest_booking_date.month
-            m_bud = targets.get(cur_month)
-            
-            # 1일부터 31일까지 해당 월의 모든 OTB 데이터를 가져옴 (확정 실적 + 미래 예약 합산)
-            month_otb_all = otb_clean[otb_clean['일자_dt'].dt.month == cur_month]
-            
-            if not month_otb_all.empty:
-                st.error(f"🚨 {cur_month}월 버짓 달성 통합 시뮬레이션 (Total Month Analysis)")
-                
-                # 현재 전체 확보 수치 (이미 지나온 1~14일 실적 + 남은 날짜 예약 합계)
-                c_rev = month_otb_all['합계_매출'].sum()
-                c_rn = month_otb_all['합계_객실'].sum()
-                
-                # 달성률 계산
-                rev_ach_rate = (c_rev / m_bud['rev_won']) * 100
-                rn_ach_rate = (c_rn / m_bud['rn']) * 100
-                
-                # 📊 상단 통합 달성률 메트릭 (여기서 95%대의 수치가 정확히 찍힙니다)
-                sc1, sc2, sc3 = st.columns(3)
-                sc1.metric("1월 총 확보 매출 (실적+OTB)", f"{c_rev:,.0f}원", delta=f"{rev_ach_rate:.1f}% 달성")
-                sc2.metric("1월 총 확보 RN", f"{c_rn:,.0f} RN", delta=f"{rn_ach_rate:.1f}% 달성")
-                sc3.metric("1월 현재 ADR (통합)", f"{(c_rev/c_rn if c_rn > 0 else 0):,.0f}원")
+            if c_rev == 0 and not this_month_otb_all.empty:
+                 c_rev = p_rev_sum
+                 c_rn = p_rn_sum
 
-                # 🚨 숏폴 시뮬레이션 (Shortfall Analysis)
-                st.write("---")
-                st.write(f"### 🎯 {cur_month}월 버짓 100% 달성까지 남은 과제")
-                
-                last_day = calendar.monthrange(latest_booking_date.year, cur_month)[1]
-                days_left = last_day - latest_booking_date.day
+            m_bud = targets.get(analysis_month)
+            rev_ach_rate = (c_rev / m_bud['rev_won'] * 100)
+            rn_ach_rate = (current_total_rn / m_bud['rn'] * 100)
+            
+            otb_future = otb_data[otb_data['일자_dt'] >= latest_booking_date]
+            
+            if m_bud:
+                st.error(f"🚨 {analysis_month}월 버짓 달성 긴급 시뮬레이션")
+                last_day_of_month = calendar.monthrange(latest_booking_date.year, analysis_month)[1]
+                days_left = last_day_of_month - latest_booking_date.day
+                s_rev = max(0, m_bud['rev_won'] - c_rev)
+                s_rn = max(0, m_bud['rn'] - c_rn)
                 
                 if days_left > 0:
-                    short_rev = max(0, m_bud['rev_won'] - c_rev)
-                    short_rn = max(0, m_bud['rn'] - c_rn)
-                    
-                    req_rn_day = short_rn / days_left
-                    req_adr = short_rev / short_rn if short_rn > 0 else 0
-                    
-                    ss1, ss2, ss3 = st.columns(3)
-                    ss1.metric("남은 기간", f"{days_left}일")
-                    ss2.metric("일일 필요 판매량", f"{req_rn_day:.1f} RN/일")
-                    ss3.metric("필요 평균 단가 (Net)", f"{req_adr:,.0f}원")
-                    
-                    if rev_ach_rate >= 90:
-                        st.success(f"💡 **총지배인 가이드:** 사장님, 현재 {rev_ach_rate:.1f}% 확보로 버짓 돌파 직전입니다! 남은 {days_left}일 동안 하루 {req_rn_day:.1f}실을 {req_adr:,.0f}원에만 팔아도 버짓 100% 돌파합니다.")
-                    else:
-                        st.warning(f"💡 **분석:** 목표 달성을 위해 남은 {days_left}일간 매일 {req_rn_day:.1f}실을 {req_adr:,.0f}원 이상의 단가로 방어해야 합니다.")
-                else:
-                    st.info("현재 분석일이 월말이므로 금월 시뮬레이션을 종료합니다.")
+                    req_rn_per_day = s_rn / days_left
+                    req_adr = s_rev / s_rn if s_rn > 0 else 0
+                    sc1, sc2, sc3 = st.columns(3)
+                    sc1.metric("남은 기간", f"{days_left}일")
+                    sc2.metric("일일 필요 판매량", f"{req_rn_per_day:.1f} RN/일")
+                    sc3.metric("필요 평균 단가", f"{req_adr:,.0f}원")
+                    if rev_ach_rate >= 90: st.success(f"💡 현재 {rev_ach_rate:.1f}% 달성! 남은 {days_left}일간 {req_rn_per_day:.1f}실을 {req_adr:,.0f}원에 팔면 100% 돌파.")
+                    else: st.warning(f"💡 목표 달성을 위해 남은 {days_left}일간 매일 {req_rn_per_day:.1f}실을 {req_adr:,.0f}원에 팔아야 합니다.")
 
-            # 📌 향후 4개월 월별 상세 달성 현황 (Expanders)
-            st.write("---")
-            st.subheader("📅 향후 4개월 월별 버짓 달성 현황")
-            
             for i in range(4):
-                t_m = (cur_month - 1 + i) % 12 + 1
-                m_b = targets.get(t_m)
-                
-                # 데이터 필터링 (소계 제외된 깨끗한 데이터)
-                m_data = otb_clean[otb_clean['일자_dt'].dt.month == t_m]
-                
+                t_m = (analysis_month - 1 + i) % 12 + 1
+                m_data = otb_data[otb_data['일자_dt'].dt.month == t_m]
                 if not m_data.empty:
-                    m_rev_val = m_data['합계_매출'].sum()
-                    m_rn_val = m_data['합계_객실'].sum()
+                    m_b = targets.get(t_m)
+                    cur_rev = c_rev if i == 0 else m_data['합계_매출'].sum()
+                    cur_rn = c_rn if i == 0 else m_data['합계_객실'].sum()
                     
-                    with st.expander(f"📌 {t_m}월 상세 달성 현황", expanded=(i==0)):
+                    with st.expander(f"📌 {t_m}월 OTB 상세 달성 현황", expanded=(i==0)):
                         fg = st.columns(4)
-                        # 매출 게이지
-                        fg[0].plotly_chart(go.Figure(go.Indicator(
-                            mode="gauge+number", 
-                            value=(m_rev_val/m_b['rev_won'])*100, 
-                            title={'text':"매출달성(%)"},
-                            gauge={'bar':{'color':"#FF4B4B"}}
-                        )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
-                        
-                        # RN 게이지
-                        fg[1].plotly_chart(go.Figure(go.Indicator(
-                            mode="gauge+number", 
-                            value=(m_rn_val/m_b['rn'])*100, 
-                            title={'text':"RN달성(%)"},
-                            gauge={'bar':{'color':"#FF4B4B"}}
-                        )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
-                        
-                        # ADR 게이지
-                        m_adr_val = (m_rev_val/m_rn_val) if m_rn_val > 0 else 0
-                        fg[2].plotly_chart(go.Figure(go.Indicator(
-                            mode="gauge+number", 
-                            value=(m_adr_val/m_b['adr'])*100, 
-                            title={'text':"ADR달성(%)"},
-                            gauge={'bar':{'color':"#FF4B4B"}}
-                        )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
-                        
-                        # OCC 게이지
+                        fg[0].plotly_chart(go.Figure(go.Indicator(mode="gauge+number", value=(cur_rev/m_b['rev_won'])*100, title={'text':"매출달성(%)"}, gauge={'bar':{'color':"#FF4B4B"}})).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
+                        fg[1].plotly_chart(go.Figure(go.Indicator(mode="gauge+number", value=(cur_rn/m_b['rn'])*100, title={'text':"RN달성(%)"}, gauge={'bar':{'color':"#FF4B4B"}})).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
+                        cur_adr = cur_rev/cur_rn if cur_rn > 0 else 0
+                        fg[2].plotly_chart(go.Figure(go.Indicator(mode="gauge+number", value=(cur_adr/m_b['adr'])*100, title={'text':"ADR달성(%)"}, gauge={'bar':{'color':"#FF4B4B"}})).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
                         days_in_m = calendar.monthrange(latest_booking_date.year, t_m)[1]
-                        m_occ_val = (m_rn_val / (130 * days_in_m)) * 100
-                        fg[3].plotly_chart(go.Figure(go.Indicator(
-                            mode="gauge+number", 
-                            value=(m_occ_val/m_b['occ'])*100, 
-                            title={'text':"OCC달성(%)"},
-                            gauge={'bar':{'color':"#FF4B4B"}}
-                        )).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
+                        cur_occ = (cur_rn / (130 * days_in_m)) * 100
+                        fg[3].plotly_chart(go.Figure(go.Indicator(mode="gauge+number", value=(cur_occ/m_b['occ'])*100, title={'text':"OCC달성(%)"}, gauge={'bar':{'color':"#FF4B4B"}})).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
 
-            # 📈 미래 예약 가속도(Pace) 분석 차트
             st.divider()
-            st.subheader("📈 미래 예약 가속도(Pace) 분석")
+            st.subheader("📈 미래 예약 Pace 분석")
             fig_p = go.Figure()
             fig_p.add_trace(go.Bar(x=otb_future['일자_dt'], y=otb_future['점유율'], name='점유율(%)', marker_color='#a2d2ff'))
             fig_p.add_trace(go.Scatter(x=otb_future['일자_dt'], y=otb_future['합계_ADR'], name='ADR(원)', yaxis='y2', line=dict(color='#FF4B4B', width=3)))
-            fig_p.update_layout(
-                yaxis2=dict(overlaying='y', side='right'), 
-                title="날짜별 점유율 vs ADR 추이 (Pace 관제)",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
+            fig_p.update_layout(yaxis2=dict(overlaying='y', side='right'), title="날짜별 점유율 vs ADR 추이")
             st.plotly_chart(fig_p, use_container_width=True)
             
-            # 믹스 분석 차트
             cs1, cs2 = st.columns(2)
-            with cs1: st.plotly_chart(px.area(otb_future, x='일자_dt', y=['개인_객실', '단체_객실'], title="세그먼트 믹스 (Room Nights)"), use_container_width=True)
-            with cs2: st.plotly_chart(px.scatter(otb_future, x='점유율', y='합계_ADR', size='합계_매출', color='요일', hover_name='일자', title="수익 최적화 매트릭스 (Yield Matrix)"), use_container_width=True)
+            with cs1: st.plotly_chart(px.area(otb_future, x='일자_dt', y=['개인_객실', '단체_객실'], title="세그먼트 믹스"), use_container_width=True)
+            with cs2: st.plotly_chart(px.scatter(otb_future, x='점유율', y='합계_ADR', size='합계_매출', color='요일', hover_name='일자', title="수익 최적화 매트릭스"), use_container_width=True)
 
-            if st.button("🤖 AI 전문가 미래 전략 리포트"):
+            # 🤖 [수정된 AI 리포트 기능]
+            if st.button("🤖 AI 미래 전략 리포트"):
                 if api_key:
-                    with st.spinner("전문가가 팩트를 기반으로 전략을 구상 중입니다..."):
-                        # 데이터 존재 여부 확인 텍스트 생성
-                        stly_info = "제공됨" if stly_file else "부재(비교불가)"
-                        snap_info = "제공됨" if snap_file else "부재(Pace분석불가)"
-                        raw_info = "제공됨" if raw_file else "부재(리드타임분석불가)"
-
-                        # 🔥 강력한 페르소나 및 팩트 체크 프롬프트
-                        prompt = f"""
-                        "너는 20년 경력의 RM 전문가다. 하지만 반드시 내가 제공한 데이터(업로드한 파일) 내에서만 수치를 인용하라. 전년 데이터나 과거 리드타임 데이터가 없다면 임의로 숫자를 지어내지 말고, **'데이터 부재로 비교 불가'**라고 명시한 뒤 현재의 OTB Pace와 버짓 달성률만 가지고 전략을 짜라. 소설 쓰지 말고 팩트 위주로 보고하라."
-
-                        [현재 상황 데이터]
-                        - 당월(1월) 매출 달성률: {rev_ach_rate:.1f}%
-                        - 남은 일수: {days_left}일
-                        - 목표 달성 위해 매일 필요한 판매량: {req_rn_day:.1f}실
-                        - 목표 달성 위해 필요한 단가: {req_adr:,.0f}원
+                    with st.spinner("AI 전문가가 수익 전략을 분석 중입니다..."):
+                        # [🚀 v16.3 기능 추가: 데이터 상태 인식]
+                        stly_info = "제공됨" if not stly_data.empty else "부재(비교불가)"
                         
-                        [업로드 데이터 현황]
-                        - 전년 동기 OTB(STLY): {stly_info}
-                        - 1주일 전 스냅샷: {snap_info}
-                        - 상세 예약 리스트(Raw): {raw_info}
+                        prompt = f"""
+                        "너는 20년 경력의 RM 전문가다. 하지만 반드시 내가 제공한 데이터(Jan 2026) 내에서만 수치를 인용하라. 전년 데이터나 과거 리드타임 데이터가 없다면 임의로 숫자를 지어내지 말고, **'데이터 부재로 비교 불가'**라고 명시한 뒤 현재의 OTB Pace와 버짓 달성률만 가지고 전략을 짜라. 소설 쓰지 말고 팩트 위주로 보고하라."
+                        
+                        [데이터 상태: {stly_info}]
+                        [당월(1월) 매출 달성률: {rev_ach_rate:.1f}%]
+                        [남은 일수: {days_left}일 / 필요 일일판매량: {req_rn_per_day:.1f}실 / 필요 단가: {req_adr:,.0f}원]
 
                         1. [종합 경영 판단 및 버짓 예측]
                         - 버짓 달성 예측: 현재 예약 Pace를 고려할 때 당월 매출 목표 달성 가능성을 %로 예측하라. 숏폴(Shortfall) 발생 시 정확한 부족 금액을 산출하라.
