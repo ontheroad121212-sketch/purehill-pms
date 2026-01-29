@@ -4,3 +4,4 @@ streamlit
 google-generativeai
 requests
 plotly
+altair<5
