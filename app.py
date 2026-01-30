@@ -12,7 +12,7 @@ import json
 import io
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 통합 관제 v17.5", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 통합 관제 v17.6", layout="wide")
 
 # 대시보드 스타일
 st.markdown("""
@@ -54,7 +54,7 @@ if not firebase_admin._apps:
 with st.sidebar:
     st.header("🎯 경영 타겟 및 조회")
     
-    # 🔥 데이터 기준일 (OTB의 '현재' 시점)
+    # 🔥 데이터 기준일
     ref_date = st.date_input("📅 데이터 기준일 (Snapshot Date)", datetime.now())
     
     st.divider()
@@ -83,7 +83,7 @@ with st.sidebar:
     
     st.divider()
     target_occ_ref = st.number_input("AI 판단 점유율 기준 (%)", value=85)
-    st.caption("v17.5: 완전 무삭제 통합본")
+    st.caption("v17.6: NameError 완벽 수정본")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
@@ -140,7 +140,6 @@ else:
             with st.spinner("처리 중..."):
                 prod_df_temp = process_data(prod_file, is_otb=False)
                 if not prod_df_temp.empty:
-                    # 파일 내부 날짜 추출
                     ex_date = prod_df_temp['예약일'].max().strftime("%Y-%m-%d")
                     # 저장
                     bucket.blob(f"production/prod_{ex_date}.csv").upload_from_string(prod_df_temp.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
@@ -221,10 +220,13 @@ def render_booking_dashboard(curr_df, prev_df, title_label, current_label, prev_
     
     bc1.metric("전체 조식 비중", f"{get_bf_ratio(curr_df):.1f}%")
     
+    # 🔥 [복구 완료] FIT 현재 실적 계산
     f_curr = curr_df[curr_df['market_segment'] == 'FIT']
+    ft_tot, ft_room, ft_rn, ft_adr = calc_metrics(f_curr)
+    
+    # 🔥 [복구 완료] Group 현재 실적 계산
     g_curr = curr_df[curr_df['market_segment'] == 'Group']
-    ft_tot, _, ft_rn, ft_adr = calc_metrics(f_curr)
-    gt_tot, _, gt_rn, gt_adr = calc_metrics(g_curr)
+    gt_tot, gt_room, gt_rn, gt_adr = calc_metrics(g_curr)
     
     bc2.metric("FIT 매출비중", f"{(ft_tot/t_tot*100 if t_tot>0 else 0):.1f}%")
     bc3.metric("Group 매출비중", f"{(gt_tot/t_tot*100 if t_tot>0 else 0):.1f}%")
