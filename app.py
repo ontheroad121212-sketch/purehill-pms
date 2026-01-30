@@ -84,89 +84,96 @@ otb_data = pd.DataFrame()
 stly_data = pd.DataFrame()
 
 bucket = storage.bucket()
-date_str = ref_date.strftime("%Y-%m-%d")
+date_str = ref_date.strftime("%Y-%m-%d") # 사이드바(조회 기준일)
 
+# 사이드바 날짜 기준 파일 경로
 blob_prod = bucket.blob(f"production/prod_{date_str}.csv")
 blob_otb = bucket.blob(f"otb/otb_{date_str}.csv")
 blob_stly = bucket.blob(f"stly/stly_{date_str}.csv")
 
-# 3. 데이터 로드 및 처리 (파이어베이스 연동 로직 적용)
-prod_data = pd.DataFrame()
-otb_data = pd.DataFrame()
-stly_data = pd.DataFrame()
-
-bucket = storage.bucket()
-date_str = ref_date.strftime("%Y-%m-%d")
-
-blob_prod = bucket.blob(f"production/prod_{date_str}.csv")
-blob_otb = bucket.blob(f"otb/otb_{date_str}.csv")
-blob_stly = bucket.blob(f"stly/stly_{date_str}.csv")
-
-# 1) 파이어베이스 조회 시도 (둘 다 있어야 성공 처리)
-if blob_prod.exists() and blob_otb.exists():
-    st.success(f"☁️ 클라우드에서 {date_str} 기준 데이터를 성공적으로 불러왔습니다!")
+# 1) 실적 데이터 로드 시도
+if blob_prod.exists():
     prod_content = blob_prod.download_as_string()
-    otb_content = blob_otb.download_as_string()
     prod_data = pd.read_csv(io.BytesIO(prod_content))
-    otb_data = pd.read_csv(io.BytesIO(otb_content))
-    
-    # 날짜 컬럼 복원
     if '예약일' in prod_data.columns: prod_data['예약일'] = pd.to_datetime(prod_data['예약일'])
     if '일자' in prod_data.columns: prod_data['일자'] = pd.to_datetime(prod_data['일자'])
-    if '일자_dt' in otb_data.columns: otb_data['일자_dt'] = pd.to_datetime(otb_data['일자_dt'])
-    
-    if blob_stly.exists():
-        stly_content = blob_stly.download_as_string()
-        stly_data = pd.read_csv(io.BytesIO(stly_content))
-        if '일자_dt' in stly_data.columns: stly_data['일자_dt'] = pd.to_datetime(stly_data['일자_dt'])
 
+# 2) OTB 데이터 로드 시도
+if blob_otb.exists():
+    otb_content = blob_otb.download_as_string()
+    otb_data = pd.read_csv(io.BytesIO(otb_content))
+    if '일자_dt' in otb_data.columns: otb_data['일자_dt'] = pd.to_datetime(otb_data['일자_dt'])
+
+# 3) STLY 데이터 로드 시도
+if blob_stly.exists():
+    stly_content = blob_stly.download_as_string()
+    stly_data = pd.read_csv(io.BytesIO(stly_content))
+    if '일자_dt' in stly_data.columns: stly_data['일자_dt'] = pd.to_datetime(stly_data['일자_dt'])
+
+# 🔎 데이터 준비 상태 체크
+is_prod_ready = not prod_data.empty
+is_otb_ready = not otb_data.empty
+
+# [상태 메시지] 둘 다 있어야 대시보드 오픈
+if is_prod_ready and is_otb_ready:
+    st.success(f"☁️ {date_str} 기준 통합 데이터 로드 완료! 대시보드를 출력합니다.")
 else:
-    # 2) 데이터가 없거나 일부만 있을 경우 업로드 UI 표시
-    st.info(f"⚠️ {date_str} 기준 통합 데이터가 아직 완성되지 않았습니다. 필요한 데이터를 각각 업로드하고 저장 버튼을 눌러주세요.")
+    # 하나라도 없으면 업로드/저장 화면 표시
+    st.info(f"🧐 {date_str} 기준 데이터를 찾고 있습니다... (실적: {'✅' if is_prod_ready else '❌'} / OTB: {'✅' if is_otb_ready else '❌'})")
     
     col_u1, col_u2 = st.columns(2)
     
-    # [왼쪽] 1. 실적 데이터 업로드 & 저장
+    # -------------------------------------------------------
+    # [왼쪽] 1. 실적 (Production) 업로드 & 저장
+    # -------------------------------------------------------
     with col_u1:
         st.subheader("1️⃣ 실적 (Production)")
-        if blob_prod.exists():
-            st.success("✅ 실적 데이터 서버에 있음")
+        if is_prod_ready:
+            st.success(f"✅ {date_str} 실적 데이터 확보됨")
         else:
-            st.warning("❌ 실적 데이터 없음")
+            st.warning(f"❌ {date_str} 실적 파일이 필요합니다.")
             
         prod_file = st.file_uploader("실적 파일 업로드", type=['csv', 'xlsx'], key="u_prod")
         
         if prod_file:
-            if st.button("💾 실적 데이터 저장하기", key="btn_save_prod"):
-                with st.spinner("실적 데이터 처리 및 저장 중..."):
+            if st.button("💾 실적 저장", key="btn_save_prod"):
+                with st.spinner("날짜 추출 및 저장 중..."):
                     prod_df_temp = process_data(prod_file, is_otb=False)
                     if not prod_df_temp.empty:
-                        # 파일 내부 날짜 추출
+                        # 🔥 [핵심] 파일 내부의 '진짜 날짜' 추출
                         ex_date = prod_df_temp['예약일'].max().strftime("%Y-%m-%d")
-                        # 저장
+                        
+                        # 저장 실행
                         bucket.blob(f"production/prod_{ex_date}.csv").upload_from_string(prod_df_temp.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
-                        st.success(f"실적 데이터 저장 완료! (기준일: {ex_date})")
-                        st.rerun()
+                        
+                        # 피드백 로직
+                        if ex_date == date_str:
+                            st.success(f"✅ {ex_date} 데이터 저장 성공! 화면을 갱신합니다.")
+                            st.rerun()
+                        else:
+                            st.error(f"⚠️ 저장 완료! 하지만 파일 날짜({ex_date})가 현재 선택된 달력 날짜({date_str})와 다릅니다.")
+                            st.markdown(f"👉 **사이드바 달력을 `{ex_date}`로 변경**하셔야 데이터가 보입니다.")
 
-    # [오른쪽] 2. OTB 데이터 & 추가 데이터 업로드 & 저장
+    # -------------------------------------------------------
+    # [오른쪽] 2. 온더북 (OTB) 업로드 & 저장
+    # -------------------------------------------------------
     with col_u2:
-        st.subheader("2️⃣ 온더북 (OTB) & 추가 분석")
-        if blob_otb.exists():
-            st.success("✅ OTB 데이터 서버에 있음")
+        st.subheader("2️⃣ 온더북 (OTB)")
+        if is_otb_ready:
+            st.success(f"✅ {date_str} OTB 데이터 확보됨")
         else:
-            st.warning("❌ OTB 데이터 없음")
+            st.warning(f"❌ {date_str} OTB 파일이 필요합니다.")
             
-        otb_files = st.file_uploader("OTB 파일 업로드 (다중 선택 가능)", type=['csv', 'xlsx'], accept_multiple_files=True, key="u_otb")
+        otb_files = st.file_uploader("OTB 파일 (다중 선택)", type=['csv', 'xlsx'], accept_multiple_files=True, key="u_otb")
         
-        # 🚀 [복구 완료] 원래 있던 3개 파일 업로드 구역
-        with st.expander("➕ 정밀 분석용 추가 데이터 (STLY/스냅샷/Raw)", expanded=True):
-            c_add1, c_add2, c_add3 = st.columns(3)
-            with c_add1: stly_file_up = st.file_uploader("전년 동기 (STLY)", type=['csv', 'xlsx'], key="u_stly")
-            with c_add2: snap_file = st.file_uploader("1주 전 스냅샷", type=['csv', 'xlsx'], key="u_snap")
-            with c_add3: raw_file = st.file_uploader("상세 예약 (Raw)", type=['csv', 'xlsx'], key="u_raw")
+        with st.expander("➕ 추가 데이터 (STLY 등)"):
+            c_a1, c_a2, c_a3 = st.columns(3)
+            with c_a1: stly_file_up = st.file_uploader("STLY", type=['csv', 'xlsx'], key="u_stly")
+            with c_a2: snap_file = st.file_uploader("스냅샷", type=['csv', 'xlsx'], key="u_snap") # 스냅샷은 저장 로직 제외 (일회성 분석용)
+            with c_a3: raw_file = st.file_uploader("Raw", type=['csv', 'xlsx'], key="u_raw")
             
         if otb_files:
-            if st.button("💾 OTB 및 추가 데이터 저장하기", key="btn_save_otb"):
+            if st.button("💾 OTB 저장", key="btn_save_otb"):
                 with st.spinner("데이터 병합 및 저장 중..."):
                     otb_df_temp = process_data(otb_files, is_otb=True)
                     stly_df_temp = pd.DataFrame()
@@ -174,15 +181,20 @@ else:
                         stly_df_temp = process_data(stly_file_up, is_otb=True)
 
                     if not otb_df_temp.empty:
-                        # OTB는 미래 데이터라 날짜 추출이 애매하므로, 사이드바 선택 날짜(ref_date)를 기준으로 저장합니다.
-                        save_date = date_str 
+                        # OTB는 미래 데이터라 '기준일'을 파일에서 뽑기가 애매합니다.
+                        # 하지만 사장님 규칙(예약일 기준)을 따르려면, 실적 데이터와 짝을 맞춰야 하므로
+                        # 1. 사이드바 날짜를 믿거나
+                        # 2. 파일명에서 날짜를 추론하거나 해야 합니다.
+                        # 여기서는 "사이드바 날짜"를 파일명(Key)으로 쓰되, 사장님이 인지하게 합니다.
                         
-                        bucket.blob(f"otb/otb_{save_date}.csv").upload_from_string(otb_df_temp.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
+                        save_key_date = date_str 
+                        
+                        bucket.blob(f"otb/otb_{save_key_date}.csv").upload_from_string(otb_df_temp.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
                         
                         if not stly_df_temp.empty:
-                            bucket.blob(f"stly/stly_{save_date}.csv").upload_from_string(stly_df_temp.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
+                            bucket.blob(f"stly/stly_{save_key_date}.csv").upload_from_string(stly_df_temp.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
                             
-                        st.success(f"OTB 및 추가 데이터 저장 완료! (기준일: {save_date})")
+                        st.success(f"✅ {save_key_date} 기준 OTB 저장 완료!")
                         st.rerun()
 # OTB 데이터 전처리
 if not otb_data.empty and '일자_dt' in otb_data.columns:
