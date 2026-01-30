@@ -12,7 +12,7 @@ import json
 import io
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 통합 관제 v17.0", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 통합 관제 v17.1", layout="wide")
 
 # 대시보드 스타일 (가독성 및 직관적 대조 강조)
 st.markdown("""
@@ -40,10 +40,8 @@ BUDGET_DATA = {
 }
 
 # 🚀 [파이어베이스 초기화 로직]
-# .streamlit/secrets.toml 파일에 [firebase] 섹션이 있어야 합니다.
 if not firebase_admin._apps:
     try:
-        # secrets에서 키 정보를 가져와 딕셔너리로 변환
         key_dict = json.loads(st.secrets["firebase"]["service_account"])
         cred = credentials.Certificate(key_dict)
         firebase_admin.initialize_app(cred, {
@@ -56,7 +54,7 @@ if not firebase_admin._apps:
 with st.sidebar:
     st.header("🎯 경영 타겟 및 조회")
     
-    # 📅 [기능 추가] 데이터 기준일 조회 (파이어베이스 연동 핵심)
+    # 📅 [기능 추가] 데이터 기준일 조회
     ref_date = st.date_input("📅 데이터 기준일 (Snapshot Date)", datetime.now())
     st.divider()
 
@@ -76,41 +74,34 @@ with st.sidebar:
     
     st.divider()
     target_occ_ref = st.number_input("AI 판단 점유율 기준 (%)", value=85)
-    st.caption("v17.0: 파이어베이스 자동 저장/조회 탑재")
+    st.caption("v17.1: 변수명 오타 수정 완료")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
 # 3. 데이터 로드 및 처리 (파이어베이스 연동 로직 적용)
-# 사장님 지시: 조회 날짜에 파일이 있으면 가져오고, 없으면 업로드 받아서 저장한다.
-
 prod_data = pd.DataFrame()
 otb_data = pd.DataFrame()
 stly_data = pd.DataFrame()
 
-# 파이어베이스 버킷 연결
 bucket = storage.bucket()
 date_str = ref_date.strftime("%Y-%m-%d")
 
-# 파일 경로 정의
 blob_prod = bucket.blob(f"production/prod_{date_str}.csv")
 blob_otb = bucket.blob(f"otb/otb_{date_str}.csv")
-blob_stly = bucket.blob(f"stly/stly_{date_str}.csv") # 전년 동기 데이터도 저장
+blob_stly = bucket.blob(f"stly/stly_{date_str}.csv")
 
 # 1) 파이어베이스 조회 시도
 if blob_prod.exists() and blob_otb.exists():
     st.success(f"☁️ 클라우드에서 {date_str} 기준 데이터를 성공적으로 불러왔습니다!")
-    # 다운로드 및 로드
     prod_content = blob_prod.download_as_string()
     otb_content = blob_otb.download_as_string()
     prod_data = pd.read_csv(io.BytesIO(prod_content))
     otb_data = pd.read_csv(io.BytesIO(otb_content))
     
-    # 날짜 컬럼 복원 (CSV 저장 시 문자열로 변하므로)
     if '예약일' in prod_data.columns: prod_data['예약일'] = pd.to_datetime(prod_data['예약일'])
     if '일자' in prod_data.columns: prod_data['일자'] = pd.to_datetime(prod_data['일자'])
     if '일자_dt' in otb_data.columns: otb_data['일자_dt'] = pd.to_datetime(otb_data['일자_dt'])
     
-    # STLY 데이터 확인
     if blob_stly.exists():
         stly_content = blob_stly.download_as_string()
         stly_data = pd.read_csv(io.BytesIO(stly_content))
@@ -127,29 +118,23 @@ else:
     with st.expander("➕ 정밀 분석용 추가 데이터 업로드 (Pace/Pick-up/리드타임)", expanded=False):
         c_add1, c_add2, c_add3 = st.columns(3)
         with c_add1: stly_file_up = st.file_uploader("전년 동기 OTB (STLY)", type=['csv', 'xlsx'])
-        with c_add2: snap_file = st.file_uploader("1주일 전 OTB 스냅샷", type=['csv', 'xlsx']) # 스냅샷은 일회성이므로 저장 로직 제외 가능
+        with c_add2: snap_file = st.file_uploader("1주일 전 OTB 스냅샷", type=['csv', 'xlsx'])
         with c_add3: raw_file = st.file_uploader("상세 예약 리스트 (Raw Data)", type=['csv', 'xlsx'])
 
-    # 업로드된 파일 처리 및 파이어베이스 저장
     if prod_file and otb_files:
         with st.spinner("데이터 처리 및 클라우드 저장 중..."):
-            # 데이터 처리 (processor.py 사용)
             prod_data = process_data(prod_file, is_otb=False)
             otb_data = process_data(otb_files, is_otb=True)
             
             if stly_file_up:
                 stly_data = process_data(stly_file_up, is_otb=True)
             
-            # 기준일 자동 추출 (파일 내부 예약일의 최대값)
-            # 사장님 지시: "파일 안에 있는 예약일로 해야 맞을거 같은데" -> 자동 추출 로직 적용
             if not prod_data.empty:
                 extracted_date = prod_data['예약일'].max().strftime("%Y-%m-%d")
                 
-                # 만약 선택한 날짜와 파일 날짜가 다르면 경고 (하지만 저장은 파일 날짜로)
                 if extracted_date != date_str:
                     st.toast(f"💡 파일 내부 기준일({extracted_date})이 선택일과 달라 해당 날짜로 저장합니다.")
                 
-                # 파이어베이스에 CSV로 저장 (utf-8-sig로 한글 깨짐 방지)
                 bucket.blob(f"production/prod_{extracted_date}.csv").upload_from_string(prod_data.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
                 bucket.blob(f"otb/otb_{extracted_date}.csv").upload_from_string(otb_data.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
                 
@@ -158,8 +143,6 @@ else:
                 
                 st.success(f"✅ 데이터가 {extracted_date} 기준으로 안전하게 저장되었습니다! (새로고침 시 자동 로드)")
 
-
-# OTB 데이터 전처리 (소계 행 제거) - 로드된 데이터에 대해 수행
 if not otb_data.empty and '일자_dt' in otb_data.columns:
     otb_data = otb_data[otb_data['일자_dt'].notna()].copy()
 
@@ -179,7 +162,6 @@ if not prod_data.empty:
             if prev == 0: return "N/A"
             return f"{((curr - prev) / prev * 100):.1f}%"
 
-        # 성과 계산
         t_tot, t_room, t_rn, t_adr = calc_metrics(curr_df)
         p_tot, p_room, p_rn, p_adr = calc_metrics(prev_df)
 
@@ -192,7 +174,6 @@ if not prod_data.empty:
         c3.metric("판매 룸나잇", f"{t_rn:,.0f} RN", delta=f"{int(t_rn - p_rn):+d} RN (전기: {p_rn:,.0f})")
         c4.metric("객실 ADR (Net)", f"{t_adr:,.0f}원", delta=f"{get_delta_pct(t_adr, p_adr)} (전기: {p_adr:,.0f})")
 
-        # 조식 비중 분석
         st.write("---")
         st.subheader("🍳 조식 포함 예약 비중 (Segment Breakdown)")
         def get_bf_ratio(df):
@@ -208,7 +189,6 @@ if not prod_data.empty:
         bc2.metric("FIT 조식 비중", f"{bf_fit_val:.1f}%")
         bc3.metric("Group 조식 비중", f"{get_bf_ratio(curr_df[curr_df['market_segment'] == 'Group']):.1f}%")
 
-        # Monthly 버짓 게이지
         if title_label == "MONTHLY":
             m_target = targets.get(analysis_month)
             st.write("---")
@@ -221,7 +201,6 @@ if not prod_data.empty:
                 act_occ = (t_rn / (130 * 30)) * 100
                 st.plotly_chart(go.Figure(go.Indicator(mode="gauge+number", value=(act_occ/m_target['occ'])*100, title={'text':"OCC달성(%)"})).update_layout(height=180, margin=dict(t=30,b=0,l=10,r=10)), use_container_width=True)
 
-        # FIT / Group 세그먼트 성과 대조
         st.write("---")
         f_curr, f_prev = curr_df[curr_df['market_segment'] == 'FIT'], prev_df[prev_df['market_segment'] == 'FIT']
         g_curr, g_prev = curr_df[curr_df['market_segment'] == 'Group'], prev_df[prev_df['market_segment'] == 'Group']
@@ -253,7 +232,6 @@ if not prod_data.empty:
         gc3.metric("그룹 RN", f"{gt_rn:,.0f} RN", delta=f"{int(gt_rn - gp_rn):+d} RN")
         gc4.metric("그룹 ADR (Net)", f"{gt_adr:,.0f}원", delta=f"{get_delta_pct(gt_adr, gp_adr)}")
 
-        # 거래처 분석
         st.write("---")
         st.subheader("📊 FIT 거래처 심층 분석 (Top 10)")
         pure_f = f_curr[~f_curr['account'].str.contains('마이스|그룹|GRP|MICE', na=False, case=False)]
@@ -268,14 +246,12 @@ if not prod_data.empty:
             with g_col3: st.plotly_chart(px.bar(acc_stats.sort_values('los').tail(10), x='los', y='account', orientation='h', title="거래처별 평균 LOS", text_auto=True), use_container_width=True)
             with g_col4: st.plotly_chart(px.bar(acc_stats.sort_values('lead_time').tail(10), x='lead_time', y='account', orientation='h', title="거래처별 평균 리드타임", text_auto=True), use_container_width=True)
 
-        # 글로벌 OTA 분석
         st.write("---")
         gl_ch = ['아고다', 'AGODA', '익스피디아', '부킹', '트립']
         gl_df = f_curr[f_curr['account'].str.upper().str.contains('|'.join(gl_ch), na=False)]
         if not gl_df.empty:
             st.plotly_chart(px.bar(gl_df, x="account", color="country", title="글로벌 OTA 채널별 국적 비중", barmode="stack"), use_container_width=True)
         
-        # 지정 거래처 조식 선택률 (원본 무삭제 로직)
         targets_acc = ['아고다', '부킹닷컴', '익스피디아 e.c', '익스피디아 h.c', '트립닷컴', '네이버', '홈페이지', '야놀자', '호텔타임', '트립비토즈', '마이리얼트립', '올마이투어', '타이드스퀘어', 'personal']
         f_acc_df = curr_df[curr_df['account'].str.lower().str.replace(" ", "").isin([a.lower().replace(" ","") for a in targets_acc])]
         if not f_acc_df.empty:
@@ -286,7 +262,6 @@ if not prod_data.empty:
                 bf_s['ratio'] = (bf_s['조식포함'] / bf_s.iloc[:, 1:].sum(axis=1)) * 100
                 st.plotly_chart(px.bar(bf_s.sort_values('ratio', ascending=False), x='ratio', y='account', orientation='h', title="거래처별 조식 선택률 (%)", color_continuous_scale='YlOrRd', color='ratio'), use_container_width=True)
 
-        # 🚀 [v15.5 사장님 요청] 수요 집중도 매트릭스 (Stay-Date 기반)
         if not curr_df.empty:
             st.write("---")
             st.subheader(f"🎯 [{title_label}] 생성 예약분 기반 체크인 수요 매트릭스")
@@ -299,7 +274,6 @@ if not prod_data.empty:
                                     labels={date_col: '체크인 예정일 (Stay Date)', 'Net_ADR': 'ADR(Net)', 'room_nights': '예약량(RN)'})
             st.plotly_chart(fig_matrix, use_container_width=True)
 
-        # 🚀 [v15.5 사장님 요청] 뾰족하게 다듬은 럭셔리 RM 전문가 AI 리포트
         if st.button(f"🤖 AI 전문가 [{title_label}] 전략 리포트", key=f"ai_{title_label}"):
             if api_key:
                 with st.spinner("전문가가 성과를 정밀 진단 중..."):
@@ -342,7 +316,6 @@ if not prod_data.empty:
         if not otb_data.empty:
             st.subheader("🚀 향후 4개월 월별 버짓 달성 현황 및 긴급 시뮬레이션")
             
-            # 🔥 [달성률 계산 로직]
             this_month_prod = prod_data[prod_data['예약일'].dt.month == analysis_month]
             p_rev_sum = this_month_prod['객실매출액'].sum()
             p_rn_sum = this_month_prod['room_nights'].sum()
@@ -357,7 +330,7 @@ if not prod_data.empty:
 
             m_bud = targets.get(analysis_month)
             rev_ach_rate = (c_rev / m_bud['rev_won'] * 100)
-            rn_ach_rate = (current_total_rn / m_bud['rn'] * 100)
+            rn_ach_rate = (c_rn / m_bud['rn'] * 100) # 🔥 [수정 완료] current_total_rn -> c_rn 으로 수정
             
             otb_future = otb_data[otb_data['일자_dt'] >= latest_booking_date]
             
@@ -412,7 +385,7 @@ if not prod_data.empty:
             if st.button("🤖 AI 미래 전략 리포트"):
                 if api_key:
                     with st.spinner("AI 전문가가 수익 전략을 분석 중입니다..."):
-                        # [🚀 v16.3 기능 추가: 데이터 상태 인식]
+                        # [v16.3 기능 추가: 데이터 상태 인식]
                         stly_info = "제공됨" if not stly_data.empty else "부재(비교불가)"
                         
                         prompt = f"""
