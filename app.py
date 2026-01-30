@@ -78,7 +78,7 @@ with st.sidebar:
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
-# 3. 데이터 로드 (파이어베이스)
+# 3. 데이터 로드 및 처리 (파이어베이스 연동 로직 적용)
 prod_data = pd.DataFrame()
 otb_data = pd.DataFrame()
 stly_data = pd.DataFrame()
@@ -90,6 +90,7 @@ blob_prod = bucket.blob(f"production/prod_{date_str}.csv")
 blob_otb = bucket.blob(f"otb/otb_{date_str}.csv")
 blob_stly = bucket.blob(f"stly/stly_{date_str}.csv")
 
+# 1) 파이어베이스 조회 시도
 if blob_prod.exists() and blob_otb.exists():
     st.success(f"☁️ 클라우드에서 {date_str} 기준 데이터를 성공적으로 불러왔습니다!")
     prod_content = blob_prod.download_as_string()
@@ -108,7 +109,9 @@ if blob_prod.exists() and blob_otb.exists():
         if '일자_dt' in stly_data.columns: stly_data['일자_dt'] = pd.to_datetime(stly_data['일자_dt'])
 
 else:
+    # 2) 데이터가 없으면 업로드 UI 표시
     st.warning(f"⚠️ {date_str} 기준 데이터가 서버에 없습니다. 파일을 업로드하면 자동으로 저장됩니다.")
+    
     col_up1, col_up2 = st.columns(2)
     with col_up1: prod_file = st.file_uploader("1. 실적 (Production)", type=['csv', 'xlsx'])
     with col_up2: otb_files = st.file_uploader("2. 온더북 (OTB)", type=['csv', 'xlsx'], accept_multiple_files=True)
@@ -119,6 +122,7 @@ else:
         with c_add2: snap_file = st.file_uploader("1주일 전 OTB 스냅샷", type=['csv', 'xlsx'])
         with c_add3: raw_file = st.file_uploader("상세 예약 리스트 (Raw Data)", type=['csv', 'xlsx'])
 
+    # 업로드 및 저장 로직 (여기가 핀셋 수정됨!)
     if prod_file and otb_files:
         with st.spinner("데이터 처리 및 클라우드 저장 중..."):
             prod_data = process_data(prod_file, is_otb=False)
@@ -127,15 +131,21 @@ else:
             
             if not prod_data.empty:
                 extracted_date = prod_data['예약일'].max().strftime("%Y-%m-%d")
-                if extracted_date != date_str:
-                    st.toast(f"💡 파일 내부 기준일({extracted_date})이 선택일과 달라 해당 날짜로 저장합니다.")
                 
+                # 경고 메시지 토스트
+                if extracted_date != date_str:
+                    st.toast(f"💡 주의: 선택하신 날짜({date_str})와 파일 내부 날짜({extracted_date})가 다릅니다. {extracted_date}로 저장됩니다.")
+                
+                # 저장 실행
                 bucket.blob(f"production/prod_{extracted_date}.csv").upload_from_string(prod_data.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
                 bucket.blob(f"otb/otb_{extracted_date}.csv").upload_from_string(otb_data.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
                 if not stly_data.empty:
                     bucket.blob(f"stly/stly_{extracted_date}.csv").upload_from_string(stly_data.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
                 
-                st.success(f"✅ 데이터가 {extracted_date} 기준으로 안전하게 저장되었습니다! (새로고침 시 자동 로드)")
+                st.success(f"✅ {extracted_date} 기준 데이터 저장 완료! 화면을 새로고침합니다.")
+                
+                # 🔥 [핵심 수정] 저장 후 바로 새로고침하여 데이터를 로드하게 만듦
+                st.rerun()
 
 # OTB 데이터 전처리
 if not otb_data.empty and '일자_dt' in otb_data.columns:
