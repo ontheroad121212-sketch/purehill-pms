@@ -12,7 +12,7 @@ import json
 import io
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 통합 관제 v17.2", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 통합 관제 v17.3", layout="wide")
 
 # 대시보드 스타일
 st.markdown("""
@@ -57,15 +57,6 @@ with st.sidebar:
     # 데이터 기준일 조회
     ref_date = st.date_input("📅 데이터 기준일 (Snapshot Date)", datetime.now())
     
-    # 🆕 [기능 추가] 기간별 맞춤 조회 설정
-    st.divider()
-    st.subheader("🔍 기간별 맞춤 조회")
-    custom_date_range = st.date_input(
-        "분석할 기간을 선택하세요 (시작일 ~ 종료일)",
-        (ref_date - timedelta(days=7), ref_date), # 기본값: 최근 1주일
-        max_value=ref_date
-    )
-    
     st.divider()
     api_key = st.text_input("Gemini API Key", type="password", placeholder="여기에 키를 입력하세요")
     st.divider()
@@ -83,7 +74,7 @@ with st.sidebar:
     
     st.divider()
     target_occ_ref = st.number_input("AI 판단 점유율 기준 (%)", value=85)
-    st.caption("v17.2: 기간별 맞춤 조회 기능 추가 (무삭제본)")
+    st.caption("v17.3: 비교 기간 수동 선택 기능 탑재")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
@@ -271,11 +262,10 @@ if not prod_data.empty:
                 bf_s['ratio'] = (bf_s['조식포함'] / bf_s.iloc[:, 1:].sum(axis=1)) * 100
                 st.plotly_chart(px.bar(bf_s.sort_values('ratio', ascending=False), x='ratio', y='account', orientation='h', title="거래처별 조식 선택률 (%)", color_continuous_scale='YlOrRd', color='ratio'), use_container_width=True)
 
-        # 수요 집중도 매트릭스 (Stay-Date 기반)
+        # 수요 집중도 매트릭스
         if not curr_df.empty:
             st.write("---")
             st.subheader(f"🎯 [{title_label}] 생성 예약분 기반 체크인 수요 매트릭스")
-            # 💡 날짜형 컬럼 중 '예약일'이 아닌 다른 날짜 컬럼(투숙일)을 자동으로 찾습니다.
             all_date_cols = curr_df.select_dtypes(include=['datetime64']).columns.tolist()
             stay_date_candidates = [c for c in all_date_cols if '예약' not in c]
             
@@ -297,7 +287,8 @@ if not prod_data.empty:
             else:
                 st.warning("⚠️ 투숙일(체크인 날짜) 데이터를 찾을 수 없어 매트릭스를 표시할 수 없습니다.")
 
-        if title_label != "CUSTOM": # Custom 탭이 아닐 때만 이 버튼 표시
+        # AI 리포트 호출 (Custom 탭이 아닐 때만 공통 버튼 사용)
+        if title_label != "CUSTOM":
             if st.button(f"🤖 AI 전문가 [{title_label}] 전략 리포트", key=f"ai_{title_label}"):
                 if api_key:
                     with st.spinner("전문가가 성과를 정밀 진단 중..."):
@@ -325,7 +316,7 @@ if not prod_data.empty:
                         """
                         st.info(get_ai_insight(api_key, prompt))
 
-    # 4. 탭 구성
+    # 4. 탭 구성 (Tab 추가됨)
     tab_d, tab_w, tab_m, tab_c, tab_f = st.tabs(["📅 Daily", "📊 Weekly", "📈 Monthly", "🔍 기간별 맞춤 조회", "🚀 Future OTB (전략관제)"])
     
     with tab_d: render_booking_dashboard(prod_data[prod_data['예약일'] == latest_booking_date], prod_data[prod_data['예약일'] == latest_booking_date - timedelta(days=1)], "DAILY", "오늘", "어제")
@@ -336,36 +327,88 @@ if not prod_data.empty:
         m_start = latest_booking_date.replace(day=1)
         render_booking_dashboard(prod_data[prod_data['예약일'] >= m_start], prod_data[(prod_data['예약일'] >= (m_start - timedelta(days=1)).replace(day=1)) & (prod_data['예약일'] < m_start)], "MONTHLY", "이번달", "지난달")
     
-    # 🆕 [추가된 탭] 맞춤 조회 로직
+    # 🆕 [추가된 탭] 맞춤 조회 로직 (비교 기간 수동 선택 기능 추가)
     with tab_c:
-        st.subheader("🔍 기간별 맞춤 분석")
-        if len(custom_date_range) == 2:
+        st.subheader("🔍 기간별 맞춤 분석 & 비교")
+        
+        # 1. 컬럼 분할: 왼쪽(분석기간) / 오른쪽(비교기간)
+        cc1, cc2 = st.columns(2)
+        
+        with cc1:
+            custom_date_range = st.date_input(
+                "1️⃣ 분석할 기간 (Current Period)",
+                (ref_date - timedelta(days=7), ref_date),
+                max_value=ref_date,
+                key="curr_range"
+            )
+            
+        with cc2:
+            # 비교 기간 기본값 (직전 동기간) 미리 계산
+            if len(custom_date_range) == 2:
+                c_s, c_e = custom_date_range
+                duration = (c_e - c_s).days + 1
+                def_e = c_s - timedelta(days=1)
+                def_s = def_e - timedelta(days=duration - 1)
+                def_range = (def_s, def_e)
+            else:
+                def_range = (ref_date - timedelta(days=14), ref_date - timedelta(days=8))
+
+            compare_date_range = st.date_input(
+                "2️⃣ 비교할 과거 기간 (Comparison Period)",
+                def_range,
+                max_value=ref_date,
+                key="comp_range"
+            )
+
+        # 2. 데이터 처리 및 렌더링
+        if len(custom_date_range) == 2 and len(compare_date_range) == 2:
             s_date, e_date = custom_date_range
-            # date_input은 date 객체를 반환하므로 datetime으로 변환 (시간 비교를 위해)
-            s_date = pd.to_datetime(s_date)
-            e_date = pd.to_datetime(e_date)
+            cs_date, ce_date = compare_date_range
             
-            # 선택 기간 데이터 필터링 (prod_data의 '예약일' 컬럼 사용)
-            # 시간 부분(00:00:00) 문제 방지를 위해 .dt.date로 비교하거나 normalize
+            s_date, e_date = pd.to_datetime(s_date), pd.to_datetime(e_date)
+            cs_date, ce_date = pd.to_datetime(cs_date), pd.to_datetime(ce_date)
+            
+            # 데이터 필터링
             mask_curr = (prod_data['예약일'] >= s_date) & (prod_data['예약일'] <= e_date)
+            mask_prev = (prod_data['예약일'] >= cs_date) & (prod_data['예약일'] <= ce_date)
+            
             curr_df = prod_data[mask_curr]
-            
-            # 비교 기간 자동 계산 (선택 기간과 동일한 길이의 직전 기간)
-            duration = (e_date - s_date).days + 1
-            prev_e_date = s_date - timedelta(days=1)
-            prev_s_date = prev_e_date - timedelta(days=duration - 1)
-            
-            mask_prev = (prod_data['예약일'] >= prev_s_date) & (prod_data['예약일'] <= prev_e_date)
             prev_df = prod_data[mask_prev]
             
-            st.info(f"📊 **분석 구간:** {s_date.strftime('%Y-%m-%d')} ~ {e_date.strftime('%Y-%m-%d')} ({duration}일간)  VS  **비교 구간:** {prev_s_date.strftime('%Y-%m-%d')} ~ {prev_e_date.strftime('%Y-%m-%d')}")
+            st.info(f"📊 **분석 구간:** {s_date.strftime('%Y-%m-%d')} ~ {e_date.strftime('%Y-%m-%d')}  VS  **비교 구간:** {cs_date.strftime('%Y-%m-%d')} ~ {ce_date.strftime('%Y-%m-%d')}")
             
             if not curr_df.empty:
-                render_booking_dashboard(curr_df, prev_df, "CUSTOM", "선택 기간", "직전 동기간")
+                # Custom 탭 전용 렌더링 호출
+                render_booking_dashboard(curr_df, prev_df, "CUSTOM", "선택 기간", "비교 기간")
+                
+                # Custom 탭 전용 AI 리포트 버튼 (여기에만 별도 배치)
+                if st.button("🤖 AI 전문가 [맞춤 기간] 전략 리포트", key="ai_custom"):
+                    if api_key:
+                        with st.spinner("선택하신 기간의 데이터를 정밀 분석 중입니다..."):
+                            t_tot, t_room, t_rn, t_adr = calc_metrics(curr_df)
+                            p_tot, p_room, p_rn, p_adr = calc_metrics(prev_df)
+                            
+                            def get_delta_pct(curr, prev):
+                                if prev == 0: return "N/A"
+                                return f"{((curr - prev) / prev * 100):.1f}%"
+
+                            prompt = f"""
+                            당신은 호텔 RM 전문가입니다. 사용자가 지정한 두 기간의 실적을 비교 분석하세요.
+                            
+                            [기간 1: {s_date.strftime('%Y-%m-%d')} ~ {e_date.strftime('%Y-%m-%d')}]
+                            - 매출: {t_tot:,.0f}, RN: {t_rn}, ADR: {t_adr:,.0f}
+                            
+                            [기간 2 (비교군): {cs_date.strftime('%Y-%m-%d')} ~ {ce_date.strftime('%Y-%m-%d')}]
+                            - 매출 변화: {get_delta_pct(t_tot, p_tot)}
+                            - RN 변화: {int(t_rn - p_rn):+d}
+                            
+                            주요 변화의 원인과 향후 전략을 불렛포인트로 요약하세요.
+                            """
+                            st.info(get_ai_insight(api_key, prompt))
             else:
-                st.warning("선택하신 기간에 해당하는 데이터가 없습니다.")
+                st.warning("선택하신 '분석 기간'에 해당하는 데이터가 없습니다.")
         else:
-            st.info("사이드바에서 시작일과 종료일을 모두 선택해주세요.")
+            st.info("두 기간(분석 기간, 비교 기간)의 시작일과 종료일을 모두 선택해주세요.")
 
     # 5. 미래 OTB 및 시뮬레이션
     with tab_f:
@@ -441,7 +484,6 @@ if not prod_data.empty:
             if st.button("🤖 AI 미래 전략 리포트"):
                 if api_key:
                     with st.spinner("AI 전문가가 수익 전략을 분석 중입니다..."):
-                        # [v16.3 기능 추가: 데이터 상태 인식]
                         stly_info = "제공됨" if not stly_data.empty else "부재(비교불가)"
                         
                         prompt = f"""
