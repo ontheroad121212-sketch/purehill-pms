@@ -90,6 +90,18 @@ blob_prod = bucket.blob(f"production/prod_{date_str}.csv")
 blob_otb = bucket.blob(f"otb/otb_{date_str}.csv")
 blob_stly = bucket.blob(f"stly/stly_{date_str}.csv")
 
+# 3. 데이터 로드 및 처리 (파이어베이스 연동 로직 적용)
+prod_data = pd.DataFrame()
+otb_data = pd.DataFrame()
+stly_data = pd.DataFrame()
+
+bucket = storage.bucket()
+date_str = ref_date.strftime("%Y-%m-%d")
+
+blob_prod = bucket.blob(f"production/prod_{date_str}.csv")
+blob_otb = bucket.blob(f"otb/otb_{date_str}.csv")
+blob_stly = bucket.blob(f"stly/stly_{date_str}.csv")
+
 # 1) 파이어베이스 조회 시도 (둘 다 있어야 성공 처리)
 if blob_prod.exists() and blob_otb.exists():
     st.success(f"☁️ 클라우드에서 {date_str} 기준 데이터를 성공적으로 불러왔습니다!")
@@ -114,7 +126,7 @@ else:
     
     col_u1, col_u2 = st.columns(2)
     
-    # [왼쪽] 실적 데이터 업로드 & 저장
+    # [왼쪽] 1. 실적 데이터 업로드 & 저장
     with col_u1:
         st.subheader("1️⃣ 실적 (Production)")
         if blob_prod.exists():
@@ -134,11 +146,11 @@ else:
                         # 저장
                         bucket.blob(f"production/prod_{ex_date}.csv").upload_from_string(prod_df_temp.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
                         st.success(f"실적 데이터 저장 완료! (기준일: {ex_date})")
-                        st.rerun() # 새로고침
+                        st.rerun()
 
-    # [오른쪽] OTB 데이터 업로드 & 저장
+    # [오른쪽] 2. OTB 데이터 & 추가 데이터 업로드 & 저장
     with col_u2:
-        st.subheader("2️⃣ 온더북 (OTB)")
+        st.subheader("2️⃣ 온더북 (OTB) & 추가 분석")
         if blob_otb.exists():
             st.success("✅ OTB 데이터 서버에 있음")
         else:
@@ -146,21 +158,23 @@ else:
             
         otb_files = st.file_uploader("OTB 파일 업로드 (다중 선택 가능)", type=['csv', 'xlsx'], accept_multiple_files=True, key="u_otb")
         
-        # [옵션] 추가 데이터도 여기서 같이 받아서 OTB 저장할 때 같이 처리
-        with st.expander("➕ STLY/스냅샷/Raw 추가 (선택)"):
-            stly_file_up = st.file_uploader("전년 동기 (STLY)", type=['csv', 'xlsx'], key="u_stly")
+        # 🚀 [복구 완료] 원래 있던 3개 파일 업로드 구역
+        with st.expander("➕ 정밀 분석용 추가 데이터 (STLY/스냅샷/Raw)", expanded=True):
+            c_add1, c_add2, c_add3 = st.columns(3)
+            with c_add1: stly_file_up = st.file_uploader("전년 동기 (STLY)", type=['csv', 'xlsx'], key="u_stly")
+            with c_add2: snap_file = st.file_uploader("1주 전 스냅샷", type=['csv', 'xlsx'], key="u_snap")
+            with c_add3: raw_file = st.file_uploader("상세 예약 (Raw)", type=['csv', 'xlsx'], key="u_raw")
             
         if otb_files:
-            if st.button("💾 OTB 데이터 저장하기", key="btn_save_otb"):
-                with st.spinner("OTB 데이터 병합 및 저장 중..."):
+            if st.button("💾 OTB 및 추가 데이터 저장하기", key="btn_save_otb"):
+                with st.spinner("데이터 병합 및 저장 중..."):
                     otb_df_temp = process_data(otb_files, is_otb=True)
                     stly_df_temp = pd.DataFrame()
                     if stly_file_up:
                         stly_df_temp = process_data(stly_file_up, is_otb=True)
 
                     if not otb_df_temp.empty:
-                        # OTB는 미래 데이터라 날짜 추출이 애매하므로, 사이드바 선택 날짜(ref_date)를 신뢰하거나 실적 날짜를 따라가야 함.
-                        # 여기서는 사용자가 선택한 ref_date를 기준으로 저장합니다.
+                        # OTB는 미래 데이터라 날짜 추출이 애매하므로, 사이드바 선택 날짜(ref_date)를 기준으로 저장합니다.
                         save_date = date_str 
                         
                         bucket.blob(f"otb/otb_{save_date}.csv").upload_from_string(otb_df_temp.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
@@ -168,8 +182,8 @@ else:
                         if not stly_df_temp.empty:
                             bucket.blob(f"stly/stly_{save_date}.csv").upload_from_string(stly_df_temp.to_csv(index=False).encode('utf-8-sig'), content_type='text/csv')
                             
-                        st.success(f"OTB 데이터 저장 완료! (기준일: {save_date})")
-                        st.rerun() # 새로고침
+                        st.success(f"OTB 및 추가 데이터 저장 완료! (기준일: {save_date})")
+                        st.rerun()
 # OTB 데이터 전처리
 if not otb_data.empty and '일자_dt' in otb_data.columns:
     otb_data = otb_data[otb_data['일자_dt'].notna()].copy()
