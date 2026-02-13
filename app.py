@@ -3,7 +3,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from processor import process_data
 from ai_engine import get_ai_insight
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, date
 import pandas as pd
 import calendar
 import firebase_admin
@@ -12,7 +12,7 @@ import json
 import io
 
 # 1. 화면 설정
-st.set_page_config(page_title="엠버퓨어힐 통합 관제 v17.6", layout="wide")
+st.set_page_config(page_title="엠버퓨어힐 통합 관제 v17.7", layout="wide")
 
 # 대시보드 스타일
 st.markdown("""
@@ -54,12 +54,12 @@ if not firebase_admin._apps:
 with st.sidebar:
     st.header("🎯 경영 타겟 및 조회")
     
-    # 🔥 데이터 기준일
-    ref_date = st.date_input("📅 데이터 기준일 (Snapshot Date)", datetime.now())
+    # 🔥 [수정] datetime.now() -> datetime.now().date() 로 시간 제거
+    ref_date = st.date_input("📅 데이터 기준일 (Snapshot Date)", datetime.now().date())
     
     st.divider()
     st.subheader("🔍 기간별 맞춤 조회")
-    # 분석 기간 선택
+    # 분석 기간 선택 (여기도 날짜 객체 보장)
     custom_date_range = st.date_input(
         "1️⃣ 분석할 기간 (Current Period)",
         (ref_date - timedelta(days=7), ref_date),
@@ -83,7 +83,7 @@ with st.sidebar:
     
     st.divider()
     target_occ_ref = st.number_input("AI 판단 점유율 기준 (%)", value=85)
-    st.caption("v17.6: NameError 완벽 수정본")
+    st.caption("v17.7: 날짜 충돌 에러(RangeError) 해결")
 
 st.title("🏛️ 엠버퓨어힐 전략분석 및 AI 경영 관제탑")
 
@@ -220,11 +220,9 @@ def render_booking_dashboard(curr_df, prev_df, title_label, current_label, prev_
     
     bc1.metric("전체 조식 비중", f"{get_bf_ratio(curr_df):.1f}%")
     
-    # 🔥 [복구 완료] FIT 현재 실적 계산
     f_curr = curr_df[curr_df['market_segment'] == 'FIT']
     ft_tot, ft_room, ft_rn, ft_adr = calc_metrics(f_curr)
     
-    # 🔥 [복구 완료] Group 현재 실적 계산
     g_curr = curr_df[curr_df['market_segment'] == 'Group']
     gt_tot, gt_room, gt_rn, gt_adr = calc_metrics(g_curr)
     
@@ -373,6 +371,7 @@ if not prod_data.empty:
         st.subheader("🔍 기간별 맞춤 분석")
         cc1, cc2 = st.columns(2)
         with cc1:
+            # 🔥 날짜 객체 보장 (v17.7 fix)
             custom_date_range = st.date_input("1️⃣ 분석 기간", (ref_date - timedelta(days=7), ref_date), max_value=ref_date, key="c_curr")
         with cc2:
             if len(custom_date_range)==2:
@@ -380,6 +379,7 @@ if not prod_data.empty:
                 dur = (e-s).days + 1
                 def_range = (s - timedelta(days=1), s - timedelta(days=dur))
             else: def_range = (ref_date, ref_date)
+            # 🔥 날짜 객체 보장
             compare_date_range = st.date_input("2️⃣ 비교 기간", def_range, max_value=ref_date, key="c_comp")
             
         if len(custom_date_range)==2 and len(compare_date_range)==2:
