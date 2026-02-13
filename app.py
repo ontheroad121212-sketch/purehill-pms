@@ -371,24 +371,38 @@ if not prod_data.empty:
         st.subheader("🔍 기간별 맞춤 분석")
         cc1, cc2 = st.columns(2)
         with cc1:
-            # 🔥 날짜 객체 보장 (v17.7 fix)
-            custom_date_range = st.date_input("1️⃣ 분석 기간", (ref_date - timedelta(days=7), ref_date), max_value=ref_date, key="c_curr")
+            # 🔥 max_value 제거하여 RangeError 해결
+            custom_date_range = st.date_input(
+                "1️⃣ 분석 기간", 
+                value=(ref_date - timedelta(days=7), ref_date), 
+                key="c_curr"
+            )
         with cc2:
-            if len(custom_date_range)==2:
+            if isinstance(custom_date_range, tuple) and len(custom_date_range) == 2:
                 s, e = custom_date_range
-                dur = (e-s).days + 1
-                def_range = (s - timedelta(days=1), s - timedelta(days=dur))
-            else: def_range = (ref_date, ref_date)
-            # 🔥 날짜 객체 보장
-            compare_date_range = st.date_input("2️⃣ 비교 기간", def_range, max_value=ref_date, key="c_comp")
+                dur = (e - s).days + 1
+                def_range = (s - timedelta(days=dur), s - timedelta(days=1))
+            else:
+                def_range = (ref_date - timedelta(days=7), ref_date)
             
-        if len(custom_date_range)==2 and len(compare_date_range)==2:
+            # 🔥 여기도 max_value 제거
+            compare_date_range = st.date_input(
+                "2️⃣ 비교 기간", 
+                value=def_range, 
+                key="c_comp"
+            )
+            
+        if isinstance(custom_date_range, tuple) and len(custom_date_range) == 2 and \
+           isinstance(compare_date_range, tuple) and len(compare_date_range) == 2:
+            
             s, e = map(pd.to_datetime, custom_date_range)
             cs, ce = map(pd.to_datetime, compare_date_range)
-            curr = prod_data[(prod_data['예약일']>=s)&(prod_data['예약일']<=e)]
-            prev = prod_data[(prod_data['예약일']>=cs)&(prod_data['예약일']<=ce)]
+            
+            curr = prod_data[(prod_data['예약일'] >= s) & (prod_data['예약일'] <= e)]
+            prev = prod_data[(prod_data['예약일'] >= cs) & (prod_data['예약일'] <= ce)]
+            
             if not curr.empty: 
-                render_booking_dashboard(curr, prev, "CUSTOM", "선택", "비교")
+                render_booking_dashboard(curr, prev, "CUSTOM", "선택 기간", "비교 기간")
                 
                 # Custom 탭 전용 AI 리포트
                 if st.button("🤖 AI 전문가 [맞춤 기간] 리포트", key="ai_custom"):
@@ -396,14 +410,16 @@ if not prod_data.empty:
                         with st.spinner("분석 중..."):
                             t_tot, t_room, t_rn, t_adr = calc_metrics(curr)
                             p_tot, p_room, p_rn, p_adr = calc_metrics(prev)
+                            rate = ((t_tot - p_tot) / p_tot * 100) if p_tot else 0
                             prompt = f"""
                             호텔 RM 전문가로서 분석하라.
                             [기간 1] 매출: {t_tot:,.0f}, RN: {t_rn}, ADR: {t_adr:,.0f}
-                            [기간 2] 대비 매출 변화율: {((t_tot-p_tot)/p_tot*100) if p_tot else 0:.1f}%
+                            [기간 2] 대비 매출 변화율: {rate:.1f}%
                             핵심 원인 및 제언을 불렛포인트로 요약하라.
                             """
                             st.info(get_ai_insight(api_key, prompt))
-            else: st.warning("데이터 없음")
+            else:
+                st.warning("선택하신 분석 기간에 해당하는 데이터가 없습니다.")
 
 # 5. 미래 OTB 및 시뮬레이션
 with tab_f:
